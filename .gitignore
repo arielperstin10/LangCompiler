@@ -1,0 +1,32 @@
+# Build files
+*.o
+*.out
+*.exe
+*.a
+*.so
+*.dll
+*.dylib
+
+# Lex/Yacc generated files
+lex.yy.c
+parser.tab.c
+parser.tab.h
+parser.output
+
+# Bison debug files
+*.output
+
+# Executables
+compiler
+
+# Editor & OS files
+*~
+*.swp
+*.bak
+.DS_Store
+
+# VSCode
+.vscode/
+
+# Logs
+*.log
