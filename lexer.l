@@ -30,6 +30,7 @@ call return CALL;
 and return AND;
 not return NOT;
 or return OR;
+type return TYPE;
 
 // Operators
 == return EQ;
