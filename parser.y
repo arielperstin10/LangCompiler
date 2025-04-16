@@ -4,7 +4,7 @@
     #include <string.h>
 
     int yylex();
-    int yyerror();
+    int yyerror(const char* s);
     typedef struct node
     {
         char* token;
@@ -13,7 +13,6 @@
     } node;
     node* mknode(char* token, node* left, node* right);
     void printTree(node* tree, int level);
-    #define YYSTYPE struct node*
 %}
 
 %union {
@@ -21,7 +20,7 @@
     float realVal;
     char charVal;
     char* stringVal;
-    void* node;
+    struct node* nodePtr;
 }
 
 %token <intVal> INTEGER
@@ -30,34 +29,38 @@
 %token <stringVal> STRING_LITERAL IDENTIFIER
 
 %token BOOL CHAR INT REAL_TYPE STRING INT_PTR CHAR_PTR REAL_PTR TYPE MODULO
-%token IF ELIF ELSE WHILE FOR VAR PAR RETURN NULL DO RETURNS BEGIN END DEF CALL AND NOT OR
+%token IF ELIF ELSE WHILE FOR VAR PAR RETURN NULL_TOKEN DO RETURNS BEGIN_TOKEN END DEF CALL AND NOT OR
 %token EQ NE GE LE GT LT ASSIGN PLUS MINUS MULT DIV AMPERSAND TRUE FALSE
+%token MAIN
 
 %left OR
 %left AND
 %left EQ NE
 %left GE LE GT LT
 %left PLUS MINUS
-%left MULT DIV
+%left MULT DIV MODULO
 %right NOT
+%right AMPERSAND
 
-%type <node> code functions function parameters parameter_list parameter var declaration_list declaration type id_list statements statement assignment_statement if_statement while_statement do_while_statement for_statement for_header update_exp condition comparison block_statement return_statement function_call_statement function_call expression
-
+%type <nodePtr> code functions function parameters parameter_list parameter var declaration_list 
+%type <nodePtr> declaration type id_list statements statement assignment_statement if_statement 
+%type <nodePtr> while_statement do_while_statement for_statement for_header update_exp condition
+%type <nodePtr> comparison block_statement return_statement function_call_statement function_call expression
 
 %%
 
-code: functions {$$ = mknode("code", $1, NULL);};
+code: functions {$$ = mknode("code", $1, NULL); printTree($$, 0);};
 
 functions: function {$$ = $1;}
         | function functions {$$ = mknode("functions", $1, $2);}
         ;
 
-function: DEF IDENTIFIER '(' parameters ')' RETURNS type var BEGIN statements END {$$ = mknode("FUNC", mknode($2, $4, mknode("ret", $6, $7)), mknode("body", $10, NULL));} 
-        | DEF "_main_" '(' ')' ':' var BEGIN statements END {$$ = mknode("FUNC", mknode("main", NULL, $5), mknode("body", $7, NULL));}
+function: DEF IDENTIFIER '(' parameters ')' RETURNS type var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode($2, $4, mknode("ret", $7, $8)), mknode("body", $10, NULL));} 
+        | DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));}
         ;
 
 parameters: /* empty */ {$$ = NULL;}
-        parameter_list {$$ = $1;};
+        | parameter_list {$$ = $1;}
         ;
 
 parameter_list: parameter {$$ = $1;}
@@ -91,10 +94,26 @@ id_list: IDENTIFIER {$$ = mknode($1, NULL, NULL);}
     | IDENTIFIER ',' id_list {$$ = mknode($1, NULL, $3);}
     | IDENTIFIER ':' expression {$$ = mknode($1, $3, NULL);}
     | IDENTIFIER ':' expression ',' id_list {$$ = mknode($1, $3, $5);}
-    | IDENTIFIER '[' INTEGER ']' {$$ = mknode($1, $3, NULL);}
-    | IDENTIFIER '[' INTEGER ']' ',' id_list {$$ = mknode($1, $3, $5);}
-    | IDENTIFIER '[' INTEGER ']' ':' STRING_LITERAL {$$ = mknode($1, $3, mknode($5, NULL, NULL));}
-    | IDENTIFIER '[' INTEGER ']' ':' STRING_LITERAL ',' id_list {$$ = mknode($1, $3, mknode($5, NULL, $7));}
+    | IDENTIFIER '[' INTEGER ']' {
+        char int_str[20];
+        sprintf(int_str, "%d", $3);
+        $$ = mknode($1, mknode(int_str, NULL, NULL), NULL);
+    }
+    | IDENTIFIER '[' INTEGER ']' ',' id_list {
+        char int_str[20];
+        sprintf(int_str, "%d", $3);
+        $$ = mknode($1, mknode(int_str, NULL, NULL), $6);
+    }
+    | IDENTIFIER '[' INTEGER ']' ':' STRING_LITERAL {
+        char int_str[20];
+        sprintf(int_str, "%d", $3);
+        $$ = mknode($1, mknode(int_str, NULL, NULL), mknode($6, NULL, NULL));
+    }
+    | IDENTIFIER '[' INTEGER ']' ':' STRING_LITERAL ',' id_list {
+        char int_str[20];
+        sprintf(int_str, "%d", $3);
+        $$ = mknode($1, mknode(int_str, NULL, NULL), mknode($6, NULL, $8));
+    }
     ;
 
 statements: statement {$$ = $1;}
@@ -112,19 +131,28 @@ statement: assignment_statement {$$ = $1;}
     ;
 
 assignment_statement:
-    IDENTIFIER ASSIGN expression ';' {$$ = mknode("assign", mknode($1, NULL, NULL), $3)};
-    | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {$$ = mknode("array_assign", mknode($1, $3, NULL), mknode($6, NULL, NULL));}
+    IDENTIFIER ASSIGN expression ';' {$$ = mknode("assign", mknode($1, NULL, NULL), $3);}
+    | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {
+        char char_str[2];
+        char_str[0] = $6;
+        char_str[1] = '\0';
+        $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(char_str, NULL, NULL));
+    }
     | '*' IDENTIFIER ASSIGN expression ';' {$$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);}
     | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' {$$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));}
-    | IDENTIFIER ASSIGN NULL ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
-    | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {char int_to_str[20]; sprintf(int_to_str, "%d", $6); $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(int_to_str, NULL, NULL));}
+    | IDENTIFIER ASSIGN NULL_TOKEN ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
+    | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {
+        char int_str[20];
+        sprintf(int_str, "%d", $6);
+        $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(int_str, NULL, NULL));
+    }
     ;
 
 if_statement:
-    IF expression ':' block_statement {$$ = mknode("if", $2, $3);}
-    | IF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if", mknode("cond", $2, NULL), mknode("then", $4, $7));}
-    | IF expression ':' block_statement ELIF expression ':' block_statement {$$ = mknode("if", $2, mknode("elif", $4, NULL));}
-    | IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if", $2, mknode("elif", $4, mknode("else", $6, NULL)));}
+    IF expression ':' block_statement {$$ = mknode("if", $2, $4);}
+    | IF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if-else", $2, mknode("then", $4, mknode("else", $7, NULL)));}
+    | IF expression ':' block_statement ELIF expression ':' block_statement {$$ = mknode("if-elif", $2, mknode("then", $4, mknode("elif-cond", $6, $8)));}
+    | IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if-elif-else", $2, mknode("then", $4, mknode("elif-cond", $6, mknode("elif-then", $8, mknode("else", $11, NULL)))));}
     ;
 
 while_statement:
@@ -132,16 +160,18 @@ while_statement:
     ;
 
 do_while_statement:
-    DO ':' block_statement WHILE expression ';' {$$ = mknode("do_while", $3, mknode("while", $5, NULL));}
+    DO ':' block_statement WHILE expression ';' {$$ = mknode("do-while", $3, mknode("cond", $5, NULL));}
     ;
 
 for_statement:
     FOR for_header ':' block_statement {$$ = mknode("for", $2, $4);}
-    | FOR for_header ':' var block_statement {$$ = mknode("for", $2, $5);}
+    | FOR for_header ':' var block_statement {$$ = mknode("for", $2, mknode("block", $5, $4));}
     ;
 
 for_header:
-    '(' IDENTIFIER ASSIGN expression ';' condition ';' update_exp ')' {$$ = mknode("for_header", mknode("assign", mknode($2, NULL, NULL), $4), mknode("loop", $6, $8));}
+    '(' IDENTIFIER ASSIGN expression ';' expression ';' update_exp ')' 
+    {$$ = mknode("for-header", mknode("init", mknode($2, NULL, NULL), $4), 
+                             mknode("loop", $6, $8));}
     ;
 
 update_exp:
@@ -149,27 +179,17 @@ update_exp:
     ;
 
 condition:
-    expression comparison expression {$$ = mknode($2, $1, $3);}
+    expression {$$ = $1;} // Just pass through the expression
     | NOT condition {$$ = mknode("not", $2, NULL);}
-    | expression OR expression {$$ = mknode("or", $1, $3);}
-    | expression AND expression {$$ = mknode("and", $1, $3);}
     | '(' condition ')' {$$ = $2;}
     | TRUE {$$ = mknode("true", NULL, NULL);}
     | FALSE {$$ = mknode("false", NULL, NULL);}
     ;
 
-comparison:
-    EQ {$$ = mknode("==", NULL, NULL);}
-    | NE {$$ = mknode("!=", NULL, NULL);}
-    | GE {$$ = mknode(">=", NULL, NULL);}
-    | LE {$$ = mknode("<=", NULL, NULL);}
-    | GT {$$ = mknode(">", NULL, NULL);}
-    | LT {$$ = mknode("<", NULL, NULL);}
-    ;
 
 block_statement:
-    BEGIN statements END {$$ = mknode("block", $2, NULL);}
-    | var BEGIN statements END {$$ = mknode("block", $3, $1);}
+    BEGIN_TOKEN statements END {$$ = mknode("block", $2, NULL);}
+    | var BEGIN_TOKEN statements END {$$ = mknode("block", $3, $1);}
     ;
     
 return_statement:
@@ -177,42 +197,78 @@ return_statement:
     ;
 
 function_call_statement:
-    function_call ';' {$$ = mknode("call", $1, NULL);}
+    function_call ';' {$$ = $1;}
     | IDENTIFIER ASSIGN function_call ';' {$$ = mknode("assign", mknode($1, NULL, NULL), $3);}
     ;
 
 function_call:
-    CALL IDENTIFIER '(' parameters ')' {$$ = mknode("call", $2, $4);}
+    CALL IDENTIFIER '(' parameters ')' {$$ = mknode("call", mknode($2, NULL, NULL), $4);}
     ;
 
-
 expression:
-    INTEGER {char int_to_str[20]; sprintf(int_to_str, "%d", $1); $$ = mknode(int_to_str, NULL, NULL);}
-    | REAL {char real_to_str[20]; sprintf(real_to_str, "%f", $1); $$ = mknode(real_to_str, NULL, NULL);}
+    INTEGER {
+        char int_str[20];
+        sprintf(int_str, "%d", $1);
+        $$ = mknode(int_str, NULL, NULL);
+    }
+    | REAL {
+        char real_str[30];
+        sprintf(real_str, "%f", $1);
+        $$ = mknode(real_str, NULL, NULL);
+    }
     | STRING_LITERAL {$$ = mknode($1, NULL, NULL);}
-    | CHAR_LITERAL {char char_to_str[2]; char_to_str[0] = $1; char_to_str[1] = '\0'; $$ = mknode(char_to_str, NULL, NULL);}
+    | CHAR_LITERAL {
+        char char_str[2];
+        char_str[0] = $1;
+        char_str[1] = '\0';
+        $$ = mknode(char_str, NULL, NULL);
+    }
     | IDENTIFIER {$$ = mknode($1, NULL, NULL);}
     | expression PLUS expression {$$ = mknode("+", $1, $3);}
     | expression MINUS expression {$$ = mknode("-", $1, $3);}
     | expression MULT expression {$$ = mknode("*", $1, $3);}
     | expression DIV expression {$$ = mknode("/", $1, $3);}
     | expression MODULO expression {$$ = mknode("%", $1, $3);}
-    | MINUS expression {$$ = mknode("-", $2, NULL);}
+    | MINUS expression {$$ = mknode("unary-", $2, NULL);}
     | AMPERSAND expression {$$ = mknode("&", $2, NULL);}
+    | '*' expression {$$ = mknode("*", $2, NULL);}
+    | '(' expression ')' {$$ = $2;}
+    | expression EQ expression {$$ = mknode("==", $1, $3);}
+    | expression NE expression {$$ = mknode("!=", $1, $3);}
+    | expression GE expression {$$ = mknode(">=", $1, $3);}
+    | expression LE expression {$$ = mknode("<=", $1, $3);}
+    | expression GT expression {$$ = mknode(">", $1, $3);}
+    | expression LT expression {$$ = mknode("<", $1, $3);}
+    | expression AND expression {$$ = mknode("and", $1, $3);}
+    | expression OR expression {$$ = mknode("or", $1, $3);}
+    | IDENTIFIER '[' expression ']' {$$ = mknode("index", mknode($1, NULL, NULL), $3);}
     ;
+
 %%
 
 #include "lex.yy.c"
 
 int main()
 {
-    return yyparse();
+    yyparse();
+    return 0;
 }
 
-void* mknode(char* token, node* left, node* right)
+node* mknode(char* token, node* left, node* right)
 {
     node* newNode = (node*)malloc(sizeof(node));
-    char* newStr = (char*)malloc(sizeof(token) + 1);
+    if (!newNode) {
+        fprintf(stderr, "Memory allocation failed for node\n");
+        exit(1);
+    }
+    
+    char* newStr = (char*)malloc(strlen(token) + 1);
+    if (!newStr) {
+        fprintf(stderr, "Memory allocation failed for token\n");
+        free(newNode);
+        exit(1);
+    }
+    
     strcpy(newStr, token);
     newNode->left = left;
     newNode->right = right;
@@ -222,17 +278,30 @@ void* mknode(char* token, node* left, node* right)
 
 void printTree(node* tree, int level)
 {
-    for (int i = 0; i < level; i++, printf("\t"));
-    if (strcmp(tree->token, ""))
+    if (!tree) return;
+    
+    for (int i = 0; i < level; i++) {
+        printf("  "); // Two spaces per level for indentation
+    }
+    
+    if (tree->token) {
         printf("%s\n", tree->token);
-    if (tree->left)
+    }
+    
+    if (tree->left) {
         printTree(tree->left, level + 1);
-    if (tree->right)
+    }
+    
+    if (tree->right) {
         printTree(tree->right, level + 1);
+    }
 }
 
-int yyerror()
+int yyerror(const char* s)
 {
-    printf("Error\n");
+    extern int yylineno;
+    extern char *yytext;
+    
+    fprintf(stderr, "Error: %s at line %d near token '%s'\n", s, yylineno, yytext);
     return 0;
 }
