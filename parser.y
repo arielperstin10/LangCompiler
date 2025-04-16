@@ -21,6 +21,7 @@
     float realVal;
     char charVal;
     char* stringVal;
+    void* node;
 }
 
 %token <intVal> INTEGER
@@ -28,9 +29,9 @@
 %token <charVal> CHAR_LITERAL
 %token <stringVal> STRING_LITERAL IDENTIFIER
 
-%token BOOL CHAR INT REAL_TYPE STRING INT_PTR CHAR_PTR REAL_PTR TYPE
+%token BOOL CHAR INT REAL_TYPE STRING INT_PTR CHAR_PTR REAL_PTR TYPE MODULO
 %token IF ELIF ELSE WHILE FOR VAR PAR RETURN NULL DO RETURNS BEGIN END DEF CALL AND NOT OR
-%token EQ NE GE LE GT LT ASSIGN PLUS MINUS MULT DIV AMPERSAND
+%token EQ NE GE LE GT LT ASSIGN PLUS MINUS MULT DIV AMPERSAND TRUE FALSE
 
 %left OR
 %left AND
@@ -39,6 +40,9 @@
 %left PLUS MINUS
 %left MULT DIV
 %right NOT
+
+%type <node> code functions function parameters parameter_list parameter var declaration_list declaration type id_list statements statement assignment_statement if_statement while_statement do_while_statement for_statement for_header update_exp condition comparison block_statement return_statement function_call_statement function_call expression
+
 
 %%
 
@@ -49,7 +53,7 @@ functions: function {$$ = $1;}
         ;
 
 function: DEF IDENTIFIER '(' parameters ')' RETURNS type var BEGIN statements END {$$ = mknode("FUNC", mknode($2, $4, mknode("ret", $6, $7)), mknode("body", $10, NULL));} 
-        | DEF '_main_' '(' ')' ':' var BEGIN statements END {$$ = mknode("FUNC", mknode("main", NULL, $5), mknode("body", $7, NULL));}
+        | DEF "_main_" '(' ')' ':' var BEGIN statements END {$$ = mknode("FUNC", mknode("main", NULL, $5), mknode("body", $7, NULL));}
         ;
 
 parameters: /* empty */ {$$ = NULL;}
@@ -108,12 +112,17 @@ statement: assignment_statement {$$ = $1;}
     ;
 
 assignment_statement:
-    IDENTIFIER ASSIGN expression ';' $$ = mknode("assign", mknode($1, NULL, NULL), $3);
+    IDENTIFIER ASSIGN expression ';' {$$ = mknode("assign", mknode($1, NULL, NULL), $3)};
+    | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {$$ = mknode("array_assign", mknode($1, $3, NULL), mknode($6, NULL, NULL));}
+    | '*' IDENTIFIER ASSIGN expression ';' {$$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);}
+    | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' {$$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));}
+    | IDENTIFIER ASSIGN NULL ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
+    | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {char int_to_str[20]; sprintf(int_to_str, "%d", $6); $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(int_to_str, NULL, NULL));}
     ;
 
 if_statement:
     IF expression ':' block_statement {$$ = mknode("if", $2, $3);}
-    | IF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if", $2, mknode("else", $4, NULL));}
+    | IF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if", mknode("cond", $2, NULL), mknode("then", $4, $7));}
     | IF expression ':' block_statement ELIF expression ':' block_statement {$$ = mknode("if", $2, mknode("elif", $4, NULL));}
     | IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if", $2, mknode("elif", $4, mknode("else", $6, NULL)));}
     ;
@@ -127,7 +136,35 @@ do_while_statement:
     ;
 
 for_statement:
-    FOR '(' assignment_statement expression ';' assignment_statement ')' ':' block_statement {$$ = mknode("for", $3, mknode("assign", mknode($5, NULL, NULL), $7), mknode("assign", mknode($9, NULL, NULL), $11), $13);}
+    FOR for_header ':' block_statement {$$ = mknode("for", $2, $4);}
+    | FOR for_header ':' var block_statement {$$ = mknode("for", $2, $5);}
+    ;
+
+for_header:
+    '(' IDENTIFIER ASSIGN expression ';' condition ';' update_exp ')' {$$ = mknode("for_header", mknode("assign", mknode($2, NULL, NULL), $4), mknode("loop", $6, $8));}
+    ;
+
+update_exp:
+    IDENTIFIER ASSIGN expression {$$ = mknode("update", mknode($1, NULL, NULL), $3);}
+    ;
+
+condition:
+    expression comparison expression {$$ = mknode($2, $1, $3);}
+    | NOT condition {$$ = mknode("not", $2, NULL);}
+    | expression OR expression {$$ = mknode("or", $1, $3);}
+    | expression AND expression {$$ = mknode("and", $1, $3);}
+    | '(' condition ')' {$$ = $2;}
+    | TRUE {$$ = mknode("true", NULL, NULL);}
+    | FALSE {$$ = mknode("false", NULL, NULL);}
+    ;
+
+comparison:
+    EQ {$$ = mknode("==", NULL, NULL);}
+    | NE {$$ = mknode("!=", NULL, NULL);}
+    | GE {$$ = mknode(">=", NULL, NULL);}
+    | LE {$$ = mknode("<=", NULL, NULL);}
+    | GT {$$ = mknode(">", NULL, NULL);}
+    | LT {$$ = mknode("<", NULL, NULL);}
     ;
 
 block_statement:
@@ -149,20 +186,20 @@ function_call:
     ;
 
 
-expression: expression PLUS expression {$$ = mknode("+", $1, $3);}
+expression:
+    INTEGER {char int_to_str[20]; sprintf(int_to_str, "%d", $1); $$ = mknode(int_to_str, NULL, NULL);}
+    | REAL {char real_to_str[20]; sprintf(real_to_str, "%f", $1); $$ = mknode(real_to_str, NULL, NULL);}
+    | STRING_LITERAL {$$ = mknode($1, NULL, NULL);}
+    | CHAR_LITERAL {char char_to_str[2]; char_to_str[0] = $1; char_to_str[1] = '\0'; $$ = mknode(char_to_str, NULL, NULL);}
+    | IDENTIFIER {$$ = mknode($1, NULL, NULL);}
+    | expression PLUS expression {$$ = mknode("+", $1, $3);}
     | expression MINUS expression {$$ = mknode("-", $1, $3);}
     | expression MULT expression {$$ = mknode("*", $1, $3);}
     | expression DIV expression {$$ = mknode("/", $1, $3);}
-    | expression EQ expression {$$ = mknode("==", $1, $3);}
-    | expression NE expression {$$ = mknode("!=", $1, $3);}
-    | expression GE expression {$$ = mknode(">=", $1, $3);}
-    | expression LE expression {$$ = mknode("<=", $1, $3);}
-    | expression GT expression {$$ = mknode(">", $1, $3);}
-    | expression LT expression {$$ = mknode("<", $1, $3);}
-    | expression AND expression {$$ = mknode("and", $1, $3);}
-    | expression OR expression {$$ = mknode("or", $1, $3);}
-    | expression NOT expression {$$ = mknode("not", $1, $3);}
-
+    | expression MODULO expression {$$ = mknode("%", $1, $3);}
+    | MINUS expression {$$ = mknode("-", $2, NULL);}
+    | AMPERSAND expression {$$ = mknode("&", $2, NULL);}
+    ;
 %%
 
 #include "lex.yy.c"
