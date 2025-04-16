@@ -1,12 +1,15 @@
 %{
-%option yylineno  
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "y.tab.h"  /* Include the parser's token definitions */
 
+extern YYSTYPE yylval;
 /* Define yywrap to avoid linking with -ll */
 int yywrap(void) { return 1; }
 %}
+
+%option yylineno
 
 DIGIT [0-9]
 HEXDIGIT [0-9a-fA-F]
