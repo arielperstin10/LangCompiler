@@ -1,7 +1,11 @@
-def _main_():
-var
-    type int:temp:0;
-    type int:t:5;
+def temp():
 begin
-    temp = t*t;
+    def abc():
+    begin
+        var
+            type int:x;
+        begin
+            x = 5;
+        end
+    end
 end

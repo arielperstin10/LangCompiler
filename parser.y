@@ -5,6 +5,9 @@
 
     int yylex();
     int yyerror(const char* s);
+    extern int yylineno;
+    extern char* yytext;
+    
     typedef struct node
     {
         char* token;
@@ -45,7 +48,8 @@
 %type <nodePtr> code functions function parameters parameter_list parameter var declaration_list 
 %type <nodePtr> declaration type id_list statements statement assignment_statement if_statement 
 %type <nodePtr> while_statement do_while_statement for_statement for_header update_exp condition
-%type <nodePtr> comparison block_statement return_statement function_call_statement function_call expression
+%type <nodePtr> block_statement return_statement function_call_statement function_call expression
+%type <nodePtr> expr_list
 
 %%
 
@@ -55,8 +59,10 @@ functions: function {$$ = $1;}
         | function functions {$$ = mknode("functions", $1, $2);}
         ;
 
-function: DEF IDENTIFIER '(' parameters ')' RETURNS type var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode($2, $4, mknode("ret", $7, $8)), mknode("body", $10, NULL));} 
-        | DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));}
+function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));}
+        | DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));} 
+        | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END 
+          {$$ = mknode("FUNC", mknode($2, $4, NULL), mknode("body", $9, NULL));}
         ;
 
 parameters: /* empty */ {$$ = NULL;}
@@ -118,6 +124,7 @@ id_list: IDENTIFIER {$$ = mknode($1, NULL, NULL);}
 
 statements: statement {$$ = $1;}
     | statement statements {$$ = mknode("statements", $1, $2);}
+    | function statements {$$ = mknode("statements", mknode("nested_func", $1, NULL), $2);}
     ;
 
 statement: assignment_statement {$$ = $1;}
@@ -138,13 +145,19 @@ assignment_statement:
         char_str[1] = '\0';
         $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(char_str, NULL, NULL));
     }
-    | '*' IDENTIFIER ASSIGN expression ';' {$$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);}
+    | MULT IDENTIFIER ASSIGN expression ';' {$$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);}
     | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' {$$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));}
     | IDENTIFIER ASSIGN NULL_TOKEN ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
     | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {
         char int_str[20];
         sprintf(int_str, "%d", $6);
         $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(int_str, NULL, NULL));
+    }
+    | IDENTIFIER '[' expression ']' ASSIGN STRING_LITERAL ';' {
+        $$ = mknode("array_assign", mknode($1, $3, NULL), mknode($6, NULL, NULL));
+    }
+    | IDENTIFIER '[' expression ']' ASSIGN expression ';' {
+        $$ = mknode("array_assign", mknode($1, $3, NULL), $6);
     }
     ;
 
@@ -186,7 +199,6 @@ condition:
     | FALSE {$$ = mknode("false", NULL, NULL);}
     ;
 
-
 block_statement:
     BEGIN_TOKEN statements END {$$ = mknode("block", $2, NULL);}
     | var BEGIN_TOKEN statements END {$$ = mknode("block", $3, $1);}
@@ -202,7 +214,13 @@ function_call_statement:
     ;
 
 function_call:
-    CALL IDENTIFIER '(' parameters ')' {$$ = mknode("call", mknode($2, NULL, NULL), $4);}
+    CALL IDENTIFIER '(' ')' {$$ = mknode("call", mknode($2, NULL, NULL), NULL);}
+    | CALL IDENTIFIER '(' expr_list ')' {$$ = mknode("call", mknode($2, NULL, NULL), $4);}
+    ;
+
+expr_list: 
+    expression {$$ = $1;}
+    | expression ',' expr_list {$$ = mknode("expr_list", $1, $3);}
     ;
 
 expression:
@@ -231,7 +249,8 @@ expression:
     | expression MODULO expression {$$ = mknode("%", $1, $3);}
     | MINUS expression {$$ = mknode("unary-", $2, NULL);}
     | AMPERSAND expression {$$ = mknode("&", $2, NULL);}
-    | '*' expression {$$ = mknode("*", $2, NULL);}
+    | MULT IDENTIFIER {$$ = mknode("deref", mknode($2, NULL, NULL), NULL);}
+    | MULT expression {$$ = mknode("*", $2, NULL);}
     | '(' expression ')' {$$ = $2;}
     | expression EQ expression {$$ = mknode("==", $1, $3);}
     | expression NE expression {$$ = mknode("!=", $1, $3);}
@@ -242,6 +261,7 @@ expression:
     | expression AND expression {$$ = mknode("and", $1, $3);}
     | expression OR expression {$$ = mknode("or", $1, $3);}
     | IDENTIFIER '[' expression ']' {$$ = mknode("index", mknode($1, NULL, NULL), $3);}
+    | function_call {$$ = $1;} /* Allow function calls in expressions */
     ;
 
 %%
@@ -299,9 +319,6 @@ void printTree(node* tree, int level)
 
 int yyerror(const char* s)
 {
-    extern int yylineno;
-    extern char *yytext;
-    
     fprintf(stderr, "Error: %s at line %d near token '%s'\n", s, yylineno, yytext);
     return 0;
 }
