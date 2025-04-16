@@ -16,6 +16,7 @@
     } node;
     node* mknode(char* token, node* left, node* right);
     void printTree(node* tree, int level);
+    void visualize_ast(node* root, const char* branch_prefix, int is_left_branch);
 %}
 
 %union {
@@ -49,11 +50,11 @@
 %type <nodePtr> declaration type id_list statements statement assignment_statement if_statement 
 %type <nodePtr> while_statement do_while_statement for_statement for_header update_exp condition
 %type <nodePtr> block_statement return_statement function_call_statement function_call expression
-%type <nodePtr> expr_list
+%type <nodePtr> expr_list nested_function
 
 %%
 
-code: functions {$$ = mknode("code", $1, NULL); printTree($$, 0);};
+code: functions {$$ = mknode("code", $1, NULL); visualize_ast($1, "", 1);};
 
 functions: function {$$ = $1;}
         | function functions {$$ = mknode("functions", $1, $2);}
@@ -124,7 +125,16 @@ id_list: IDENTIFIER {$$ = mknode($1, NULL, NULL);}
 
 statements: statement {$$ = $1;}
     | statement statements {$$ = mknode("statements", $1, $2);}
-    | function statements {$$ = mknode("statements", mknode("nested_func", $1, NULL), $2);}
+    | nested_function {$$ = $1;}
+    | nested_function statements {$$ = mknode("statements", $1, $2);}
+    ;
+
+
+nested_function: 
+    DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END
+    {$$ = mknode("nested_func", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));}
+    | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END
+    {$$ = mknode("nested_func", mknode($2, $4, NULL), mknode("body", $9, NULL));}
     ;
 
 statement: assignment_statement {$$ = $1;}
@@ -321,4 +331,32 @@ int yyerror(const char* s)
 {
     fprintf(stderr, "Error: %s at line %d near token '%s'\n", s, yylineno, yytext);
     return 0;
+}
+
+void visualize_ast(node* root, const char* branch_prefix, int is_left_branch) {
+    if (!root) return;
+
+    // Print current node with appropriate branch connector
+    printf("%s", branch_prefix);
+    printf(is_left_branch ? "├── " : "└── ");
+    printf("%s\n", root->token);
+
+    // Create new prefix for child nodes
+    char child_prefix[1024];
+    snprintf(child_prefix, sizeof(child_prefix), "%s%s", 
+             branch_prefix, 
+             is_left_branch ? "│   " : "    ");
+
+    // Handle different child node cases
+    if (root->left && root->right) {
+        // Both children exist - left child is not last
+        visualize_ast(root->left, child_prefix, 1);
+        visualize_ast(root->right, child_prefix, 0);
+    } else if (root->left) {
+        // Only left child exists
+        visualize_ast(root->left, child_prefix, 0);
+    } else if (root->right) {
+        // Only right child exists
+        visualize_ast(root->right, child_prefix, 0);
+    }
 }
