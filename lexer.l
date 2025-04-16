@@ -1,3 +1,13 @@
+%{
+%option yylineno  
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Define yywrap to avoid linking with -ll */
+int yywrap(void) { return 1; }
+%}
+
 DIGIT [0-9]
 HEXDIGIT [0-9a-fA-F]
 ID [A-Za-z][A-Za-z0-9_]*
@@ -17,12 +27,12 @@ ID [A-Za-z][A-Za-z0-9_]*
 "while"           { return WHILE; }
 "for"             { return FOR; }
 "var"             { return VAR; }
-par[0-9]+         { return PAR; }
+"par"[0-9]+       { return PAR; }
 "return"          { return RETURN; }
-"null"            { return NULL; }
+"null"            { return NULL_TOKEN; }  /* Changed from NULL to NULL_TOKEN to avoid conflict */
 "do"              { return DO; }
 "returns"         { return RETURNS; }
-"begin"           { return BEGIN; }
+"begin"           { return BEGIN_TOKEN; } /* Changed from BEGIN to BEGIN_TOKEN to avoid conflict */
 "end"             { return END; }
 "def"             { return DEF; }
 "call"            { return CALL; }
@@ -30,6 +40,7 @@ par[0-9]+         { return PAR; }
 "not"             { return NOT; }
 "or"              { return OR; }
 "type"            { return TYPE; }
+"_main_"          { return MAIN; }
 
 "=="              { return EQ; }
 "!="              { return NE; }
@@ -38,27 +49,57 @@ par[0-9]+         { return PAR; }
 ">"               { return GT; }
 "<"               { return LT; }
 "="               { return ASSIGN; }
-"\+"              { return PLUS; }
+"+"               { return PLUS; }
 "-"               { return MINUS; }
-"\*"              { return MULT; }
+"*"               { return MULT; }
 "/"               { return DIV; }
 "&"               { return AMPERSAND; }
 "%"               { return MODULO; }
-"true"            { return TRUE; }
-"false"           { return FALSE; }
+"TRUE"            { return TRUE; }
+"FALSE"           { return FALSE; }
 
-0x{HEXDIGIT}+ {yylval.intVal = (int)strtol(yytext, NULL, 16); return INTEGER;}
-{DIGIT}+ {yylval.intVal = atoi(yytext); return INTEGER;}
-[+-]?{DIGIT}+"."{DIGIT}*([eE][+-]?{DIGIT}+)? {yylval.realVal = atof(yytext); return REAL;}
-[+-]?\\.{DIGIT}+([eE][+-]?{DIGIT}+)? {yylval.realVal = atof(yytext); return REAL;}
+"("               { return '('; }
+")"               { return ')'; }
+"["               { return '['; }
+"]"               { return ']'; }
+"{"               { return '{'; }
+"}"               { return '}'; }
+";"               { return ';'; }
+":"               { return ':'; }
+","               { return ','; }
 
-\"[^\n\"]*\" {yylval.stringVal = strdup(yytext); return STRING_LITERAL;}
+0x{HEXDIGIT}+     { yylval.intVal = (int)strtol(yytext, NULL, 16); return INTEGER; }
+{DIGIT}+          { yylval.intVal = atoi(yytext); return INTEGER; }
 
-\'([^\'\n])\' {yylval.charVal = yytext[1]; return CHAR_LITERAL;}
+[+-]?{DIGIT}+"."{DIGIT}*([eE][+-]?{DIGIT}+)?    { yylval.realVal = atof(yytext); return REAL; }
+[+-]?"."{DIGIT}+([eE][+-]?{DIGIT}+)?            { yylval.realVal = atof(yytext); return REAL; }
+[+-]?{DIGIT}+[eE][+-]?{DIGIT}+                  { yylval.realVal = atof(yytext); return REAL; }
 
-{ID} {yylval.stringVal = strdup(yytext); return IDENTIFIER;}
+\"[^\"\n]*\"      { 
+    /* Remove quotes from string literal */
+    yytext[strlen(yytext)-1] = '\0';
+    yylval.stringVal = strdup(yytext+1); 
+    return STRING_LITERAL; 
+}
 
-\#\->([^<]|(\<[^-])|(\<\-))*\<-\# {/* ignore comment */}
+\'[^\'\\]\'       { yylval.charVal = yytext[1]; return CHAR_LITERAL; }
+\'\\[nft]\'       { 
+    /* Handle escape sequences */
+    switch(yytext[2]) {
+        case 'n': yylval.charVal = '\n'; break;
+        case 'f': yylval.charVal = '\f'; break;
+        case 't': yylval.charVal = '\t'; break;
+        default: yylval.charVal = yytext[2];
+    }
+    return CHAR_LITERAL;
+}
 
-[ \t\r\n]+ {/* ignore whitespace */}
+{ID}              { yylval.stringVal = strdup(yytext); return IDENTIFIER; }
+
+\#\-\>([^<]|(\<[^\-])|([\<][\-][^\>]))*\<\-\#  { /* Skip comments */ }
+
+[ \t\r\n]+        { /* Skip whitespace */ }
+
+.                 { fprintf(stderr, "Unrecognized character: %s\n", yytext); }
+
 %%
