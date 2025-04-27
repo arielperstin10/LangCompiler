@@ -215,7 +215,8 @@ block_statement:
     ;
     
 return_statement:
-    RETURN expression ';' {$$ = mknode("return", $2, NULL);}
+    RETURN expression ';' {$$ = mknode("return_val", $2, NULL);}
+    | RETURN ';' {$$ = mknode("return_void", NULL, NULL);}
     ;
 
 function_call_statement:
@@ -258,7 +259,8 @@ expression:
     | expression DIV expression {$$ = mknode("/", $1, $3);}
     | expression MODULO expression {$$ = mknode("%", $1, $3);}
     | MINUS expression {$$ = mknode("unary-", $2, NULL);}
-    | AMPERSAND expression {$$ = mknode("&", $2, NULL);}
+    | AMPERSAND IDENTIFIER {$$ = mknode("&", mknode($2, NULL, NULL), NULL);}
+    | AMPERSAND IDENTIFIER '[' expression ']' {$$ = mknode("&", mknode("index", mknode($2, NULL, NULL), $4), NULL);}
     | MULT IDENTIFIER {$$ = mknode("deref", mknode($2, NULL, NULL), NULL);}
     | MULT expression {$$ = mknode("*", $2, NULL);}
     | '(' expression ')' {$$ = $2;}
@@ -275,8 +277,6 @@ expression:
     ;
 
 %%
-
-#include "lex.yy.c"
 
 int main()
 {
