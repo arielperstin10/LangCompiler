@@ -61,9 +61,30 @@ functions: function {$$ = $1;}
         ;
 
 function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));}
-        | DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));} 
-        | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END 
-          {$$ = mknode("FUNC", mknode($2, $4, NULL), mknode("body", $9, NULL));}
+        | DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {
+            // Check if last statement is a return
+            node* last_stmt = $11;
+            while (last_stmt && last_stmt->right) {
+                last_stmt = last_stmt->right;
+            }
+            if (!last_stmt || strcmp(last_stmt->token, "return_val") != 0) {
+                yyerror("Error: function with RETURNS must end with a return statement");
+                YYERROR;
+            }
+            $$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
+        } 
+        | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END {
+            // Check if last statement is a return
+            node* last_stmt = $9;
+            while (last_stmt && last_stmt->right) {
+                last_stmt = last_stmt->right;
+            }
+            if (last_stmt && strcmp(last_stmt->token, "return_val") == 0) {
+                yyerror("Error: function without RETURNS must not have a return statement");
+                YYERROR;
+            }
+            $$ = mknode("FUNC", mknode($2, $4, NULL), mknode("body", $9, NULL));
+        }
         ;
 
 parameters: /* empty */ {$$ = NULL;}
@@ -132,9 +153,31 @@ statements: statement {$$ = $1;}
 
 nested_function: 
     DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END
-    {$$ = mknode("nested_func", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));}
+    {
+        // Check if last statement is a return
+        node* last_stmt = $11;
+        while (last_stmt && last_stmt->right) {
+            last_stmt = last_stmt->right;
+        }
+        if (!last_stmt || strcmp(last_stmt->token, "return_val") != 0) {
+            yyerror("Error: function with RETURNS must end with a return statement");
+            YYERROR;
+        }
+        $$ = mknode("nested_func", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
+    }
     | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END
-    {$$ = mknode("nested_func", mknode($2, $4, NULL), mknode("body", $9, NULL));}
+    {
+        // Check if last statement is a return
+        node* last_stmt = $9;
+        while (last_stmt && last_stmt->right) {
+            last_stmt = last_stmt->right;
+        }
+        if (last_stmt && strcmp(last_stmt->token, "return_val") == 0) {
+            yyerror("Error: function without RETURNS must not have a return statement");
+            YYERROR;
+        }
+        $$ = mknode("nested_func", mknode($2, $4, NULL), mknode("body", $9, NULL));
+    }
     ;
 
 statement: assignment_statement {$$ = $1;}

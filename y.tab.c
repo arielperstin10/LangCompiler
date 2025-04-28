@@ -742,17 +742,17 @@ static const yytype_int8 yytranslate[] =
 /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
 static const yytype_int16 yyrline[] =
 {
-       0,    57,    57,    59,    60,    63,    64,    65,    69,    70,
-      73,    74,    77,    79,    80,    83,    84,    87,    90,    91,
-      92,    93,    94,    95,    96,    97,   100,   101,   102,   103,
-     104,   109,   114,   119,   126,   127,   128,   129,   134,   136,
-     140,   141,   142,   143,   144,   145,   146,   147,   151,   152,
-     158,   159,   160,   161,   166,   169,   175,   176,   177,   178,
-     182,   186,   190,   191,   195,   201,   213,   214,   218,   219,
-     223,   224,   228,   229,   233,   234,   238,   243,   248,   249,
-     255,   256,   257,   258,   259,   260,   261,   262,   263,   264,
-     265,   266,   267,   268,   269,   270,   271,   272,   273,   274,
-     275,   276
+       0,    57,    57,    59,    60,    63,    64,    76,    90,    91,
+      94,    95,    98,   100,   101,   104,   105,   108,   111,   112,
+     113,   114,   115,   116,   117,   118,   121,   122,   123,   124,
+     125,   130,   135,   140,   147,   148,   149,   150,   155,   168,
+     183,   184,   185,   186,   187,   188,   189,   190,   194,   195,
+     201,   202,   203,   204,   209,   212,   218,   219,   220,   221,
+     225,   229,   233,   234,   238,   244,   256,   257,   261,   262,
+     266,   267,   271,   272,   276,   277,   281,   286,   291,   292,
+     298,   299,   300,   301,   302,   303,   304,   305,   306,   307,
+     308,   309,   310,   311,   312,   313,   314,   315,   316,   317,
+     318,   319
 };
 #endif
 
@@ -1576,625 +1576,669 @@ yyreduce:
 
   case 6: /* function: DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END  */
 #line 64 "parser.y"
-                                                                                            {(yyval.nodePtr) = mknode("FUNC", mknode((yyvsp[-10].stringVal), (yyvsp[-8].nodePtr), mknode("ret", (yyvsp[-4].nodePtr), (yyvsp[-3].nodePtr))), mknode("body", (yyvsp[-1].nodePtr), NULL));}
-#line 1581 "y.tab.c"
+                                                                                            {
+            // Check if last statement is a return
+            node* last_stmt = (yyvsp[-1].nodePtr);
+            while (last_stmt && last_stmt->right) {
+                last_stmt = last_stmt->right;
+            }
+            if (!last_stmt || strcmp(last_stmt->token, "return_val") != 0) {
+                yyerror("Error: function with RETURNS must end with a return statement");
+                YYERROR;
+            }
+            (yyval.nodePtr) = mknode("FUNC", mknode((yyvsp[-10].stringVal), (yyvsp[-8].nodePtr), mknode("ret", (yyvsp[-4].nodePtr), (yyvsp[-3].nodePtr))), mknode("body", (yyvsp[-1].nodePtr), NULL));
+        }
+#line 1592 "y.tab.c"
     break;
 
   case 7: /* function: DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END  */
-#line 66 "parser.y"
-          {(yyval.nodePtr) = mknode("FUNC", mknode((yyvsp[-8].stringVal), (yyvsp[-6].nodePtr), NULL), mknode("body", (yyvsp[-1].nodePtr), NULL));}
-#line 1587 "y.tab.c"
+#line 76 "parser.y"
+                                                                               {
+            // Check if last statement is a return
+            node* last_stmt = (yyvsp[-1].nodePtr);
+            while (last_stmt && last_stmt->right) {
+                last_stmt = last_stmt->right;
+            }
+            if (last_stmt && strcmp(last_stmt->token, "return_val") == 0) {
+                yyerror("Error: function without RETURNS must not have a return statement");
+                YYERROR;
+            }
+            (yyval.nodePtr) = mknode("FUNC", mknode((yyvsp[-8].stringVal), (yyvsp[-6].nodePtr), NULL), mknode("body", (yyvsp[-1].nodePtr), NULL));
+        }
+#line 1609 "y.tab.c"
     break;
 
   case 8: /* parameters: %empty  */
-#line 69 "parser.y"
+#line 90 "parser.y"
                         {(yyval.nodePtr) = NULL;}
-#line 1593 "y.tab.c"
+#line 1615 "y.tab.c"
     break;
 
   case 9: /* parameters: parameter_list  */
-#line 70 "parser.y"
+#line 91 "parser.y"
                          {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1599 "y.tab.c"
+#line 1621 "y.tab.c"
     break;
 
   case 10: /* parameter_list: parameter  */
-#line 73 "parser.y"
+#line 94 "parser.y"
                           {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1605 "y.tab.c"
+#line 1627 "y.tab.c"
     break;
 
   case 11: /* parameter_list: parameter ';' parameter_list  */
-#line 74 "parser.y"
+#line 95 "parser.y"
                                        {(yyval.nodePtr) = mknode("PARAMS", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 1611 "y.tab.c"
+#line 1633 "y.tab.c"
     break;
 
   case 12: /* parameter: PAR type ':' IDENTIFIER  */
-#line 77 "parser.y"
+#line 98 "parser.y"
                                    {(yyval.nodePtr) = mknode((yyvsp[0].stringVal), (yyvsp[-2].nodePtr), NULL);}
-#line 1617 "y.tab.c"
+#line 1639 "y.tab.c"
     break;
 
   case 13: /* var: %empty  */
-#line 79 "parser.y"
+#line 100 "parser.y"
                  {(yyval.nodePtr) = NULL;}
-#line 1623 "y.tab.c"
+#line 1645 "y.tab.c"
     break;
 
   case 14: /* var: VAR declaration_list  */
-#line 80 "parser.y"
+#line 101 "parser.y"
                            {(yyval.nodePtr) = mknode("VAR", (yyvsp[0].nodePtr), NULL);}
-#line 1629 "y.tab.c"
+#line 1651 "y.tab.c"
     break;
 
   case 15: /* declaration_list: declaration  */
-#line 83 "parser.y"
+#line 104 "parser.y"
                               {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1635 "y.tab.c"
+#line 1657 "y.tab.c"
     break;
 
   case 16: /* declaration_list: declaration declaration_list  */
-#line 84 "parser.y"
+#line 105 "parser.y"
                                    {(yyval.nodePtr) = mknode("decls", (yyvsp[-1].nodePtr), (yyvsp[0].nodePtr));}
-#line 1641 "y.tab.c"
+#line 1663 "y.tab.c"
     break;
 
   case 17: /* declaration: TYPE type ':' id_list ';'  */
-#line 87 "parser.y"
+#line 108 "parser.y"
                                        {(yyval.nodePtr) = mknode("DECL", (yyvsp[-3].nodePtr), (yyvsp[-1].nodePtr));}
-#line 1647 "y.tab.c"
+#line 1669 "y.tab.c"
     break;
 
   case 18: /* type: BOOL  */
-#line 90 "parser.y"
+#line 111 "parser.y"
                { (yyval.nodePtr) = mknode("BOOL", NULL, NULL); }
-#line 1653 "y.tab.c"
+#line 1675 "y.tab.c"
     break;
 
   case 19: /* type: CHAR  */
-#line 91 "parser.y"
+#line 112 "parser.y"
                  { (yyval.nodePtr) = mknode("CHAR", NULL, NULL); }
-#line 1659 "y.tab.c"
+#line 1681 "y.tab.c"
     break;
 
   case 20: /* type: INT  */
-#line 92 "parser.y"
+#line 113 "parser.y"
                  { (yyval.nodePtr) = mknode("INT", NULL, NULL); }
-#line 1665 "y.tab.c"
+#line 1687 "y.tab.c"
     break;
 
   case 21: /* type: REAL_TYPE  */
-#line 93 "parser.y"
+#line 114 "parser.y"
                  { (yyval.nodePtr) = mknode("REAL", NULL, NULL); }
-#line 1671 "y.tab.c"
+#line 1693 "y.tab.c"
     break;
 
   case 22: /* type: STRING  */
-#line 94 "parser.y"
+#line 115 "parser.y"
                  { (yyval.nodePtr) = mknode("STRING", NULL, NULL); }
-#line 1677 "y.tab.c"
+#line 1699 "y.tab.c"
     break;
 
   case 23: /* type: INT_PTR  */
-#line 95 "parser.y"
+#line 116 "parser.y"
                  { (yyval.nodePtr) = mknode("INT_PTR", NULL, NULL); }
-#line 1683 "y.tab.c"
+#line 1705 "y.tab.c"
     break;
 
   case 24: /* type: CHAR_PTR  */
-#line 96 "parser.y"
+#line 117 "parser.y"
                  { (yyval.nodePtr) = mknode("CHAR_PTR", NULL, NULL); }
-#line 1689 "y.tab.c"
+#line 1711 "y.tab.c"
     break;
 
   case 25: /* type: REAL_PTR  */
-#line 97 "parser.y"
+#line 118 "parser.y"
                  { (yyval.nodePtr) = mknode("REAL_PTR", NULL, NULL); }
-#line 1695 "y.tab.c"
+#line 1717 "y.tab.c"
     break;
 
   case 26: /* id_list: IDENTIFIER  */
-#line 100 "parser.y"
+#line 121 "parser.y"
                     {(yyval.nodePtr) = mknode((yyvsp[0].stringVal), NULL, NULL);}
-#line 1701 "y.tab.c"
+#line 1723 "y.tab.c"
     break;
 
   case 27: /* id_list: IDENTIFIER ',' id_list  */
-#line 101 "parser.y"
+#line 122 "parser.y"
                              {(yyval.nodePtr) = mknode((yyvsp[-2].stringVal), NULL, (yyvsp[0].nodePtr));}
-#line 1707 "y.tab.c"
+#line 1729 "y.tab.c"
     break;
 
   case 28: /* id_list: IDENTIFIER ':' expression  */
-#line 102 "parser.y"
+#line 123 "parser.y"
                                 {(yyval.nodePtr) = mknode((yyvsp[-2].stringVal), (yyvsp[0].nodePtr), NULL);}
-#line 1713 "y.tab.c"
+#line 1735 "y.tab.c"
     break;
 
   case 29: /* id_list: IDENTIFIER ':' expression ',' id_list  */
-#line 103 "parser.y"
+#line 124 "parser.y"
                                             {(yyval.nodePtr) = mknode((yyvsp[-4].stringVal), (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 1719 "y.tab.c"
+#line 1741 "y.tab.c"
     break;
 
   case 30: /* id_list: IDENTIFIER '[' INTEGER ']'  */
-#line 104 "parser.y"
+#line 125 "parser.y"
                                  {
         char int_str[20];
         sprintf(int_str, "%d", (yyvsp[-1].intVal));
         (yyval.nodePtr) = mknode((yyvsp[-3].stringVal), mknode(int_str, NULL, NULL), NULL);
     }
-#line 1729 "y.tab.c"
+#line 1751 "y.tab.c"
     break;
 
   case 31: /* id_list: IDENTIFIER '[' INTEGER ']' ',' id_list  */
-#line 109 "parser.y"
+#line 130 "parser.y"
                                              {
         char int_str[20];
         sprintf(int_str, "%d", (yyvsp[-3].intVal));
         (yyval.nodePtr) = mknode((yyvsp[-5].stringVal), mknode(int_str, NULL, NULL), (yyvsp[0].nodePtr));
     }
-#line 1739 "y.tab.c"
+#line 1761 "y.tab.c"
     break;
 
   case 32: /* id_list: IDENTIFIER '[' INTEGER ']' ':' STRING_LITERAL  */
-#line 114 "parser.y"
+#line 135 "parser.y"
                                                     {
         char int_str[20];
         sprintf(int_str, "%d", (yyvsp[-3].intVal));
         (yyval.nodePtr) = mknode((yyvsp[-5].stringVal), mknode(int_str, NULL, NULL), mknode((yyvsp[0].stringVal), NULL, NULL));
     }
-#line 1749 "y.tab.c"
+#line 1771 "y.tab.c"
     break;
 
   case 33: /* id_list: IDENTIFIER '[' INTEGER ']' ':' STRING_LITERAL ',' id_list  */
-#line 119 "parser.y"
+#line 140 "parser.y"
                                                                 {
         char int_str[20];
         sprintf(int_str, "%d", (yyvsp[-5].intVal));
         (yyval.nodePtr) = mknode((yyvsp[-7].stringVal), mknode(int_str, NULL, NULL), mknode((yyvsp[-2].stringVal), NULL, (yyvsp[0].nodePtr)));
     }
-#line 1759 "y.tab.c"
+#line 1781 "y.tab.c"
     break;
 
   case 34: /* statements: statement  */
-#line 126 "parser.y"
+#line 147 "parser.y"
                       {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1765 "y.tab.c"
+#line 1787 "y.tab.c"
     break;
 
   case 35: /* statements: statement statements  */
-#line 127 "parser.y"
+#line 148 "parser.y"
                            {(yyval.nodePtr) = mknode("statements", (yyvsp[-1].nodePtr), (yyvsp[0].nodePtr));}
-#line 1771 "y.tab.c"
+#line 1793 "y.tab.c"
     break;
 
   case 36: /* statements: nested_function  */
-#line 128 "parser.y"
+#line 149 "parser.y"
                       {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1777 "y.tab.c"
+#line 1799 "y.tab.c"
     break;
 
   case 37: /* statements: nested_function statements  */
-#line 129 "parser.y"
+#line 150 "parser.y"
                                  {(yyval.nodePtr) = mknode("statements", (yyvsp[-1].nodePtr), (yyvsp[0].nodePtr));}
-#line 1783 "y.tab.c"
+#line 1805 "y.tab.c"
     break;
 
   case 38: /* nested_function: DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END  */
-#line 135 "parser.y"
-    {(yyval.nodePtr) = mknode("nested_func", mknode((yyvsp[-10].stringVal), (yyvsp[-8].nodePtr), mknode("ret", (yyvsp[-4].nodePtr), (yyvsp[-3].nodePtr))), mknode("body", (yyvsp[-1].nodePtr), NULL));}
-#line 1789 "y.tab.c"
+#line 156 "parser.y"
+    {
+        // Check if last statement is a return
+        node* last_stmt = (yyvsp[-1].nodePtr);
+        while (last_stmt && last_stmt->right) {
+            last_stmt = last_stmt->right;
+        }
+        if (!last_stmt || strcmp(last_stmt->token, "return_val") != 0) {
+            yyerror("Error: function with RETURNS must end with a return statement");
+            YYERROR;
+        }
+        (yyval.nodePtr) = mknode("nested_func", mknode((yyvsp[-10].stringVal), (yyvsp[-8].nodePtr), mknode("ret", (yyvsp[-4].nodePtr), (yyvsp[-3].nodePtr))), mknode("body", (yyvsp[-1].nodePtr), NULL));
+    }
+#line 1822 "y.tab.c"
     break;
 
   case 39: /* nested_function: DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END  */
-#line 137 "parser.y"
-    {(yyval.nodePtr) = mknode("nested_func", mknode((yyvsp[-8].stringVal), (yyvsp[-6].nodePtr), NULL), mknode("body", (yyvsp[-1].nodePtr), NULL));}
-#line 1795 "y.tab.c"
+#line 169 "parser.y"
+    {
+        // Check if last statement is a return
+        node* last_stmt = (yyvsp[-1].nodePtr);
+        while (last_stmt && last_stmt->right) {
+            last_stmt = last_stmt->right;
+        }
+        if (last_stmt && strcmp(last_stmt->token, "return_val") == 0) {
+            yyerror("Error: function without RETURNS must not have a return statement");
+            YYERROR;
+        }
+        (yyval.nodePtr) = mknode("nested_func", mknode((yyvsp[-8].stringVal), (yyvsp[-6].nodePtr), NULL), mknode("body", (yyvsp[-1].nodePtr), NULL));
+    }
+#line 1839 "y.tab.c"
     break;
 
   case 40: /* statement: assignment_statement  */
-#line 140 "parser.y"
+#line 183 "parser.y"
                                 {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1801 "y.tab.c"
+#line 1845 "y.tab.c"
     break;
 
   case 41: /* statement: if_statement  */
-#line 141 "parser.y"
+#line 184 "parser.y"
                    {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1807 "y.tab.c"
+#line 1851 "y.tab.c"
     break;
 
   case 42: /* statement: while_statement  */
-#line 142 "parser.y"
+#line 185 "parser.y"
                       {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1813 "y.tab.c"
+#line 1857 "y.tab.c"
     break;
 
   case 43: /* statement: for_statement  */
-#line 143 "parser.y"
+#line 186 "parser.y"
                     {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1819 "y.tab.c"
+#line 1863 "y.tab.c"
     break;
 
   case 44: /* statement: do_while_statement  */
-#line 144 "parser.y"
+#line 187 "parser.y"
                          {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1825 "y.tab.c"
+#line 1869 "y.tab.c"
     break;
 
   case 45: /* statement: block_statement  */
-#line 145 "parser.y"
+#line 188 "parser.y"
                       {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1831 "y.tab.c"
+#line 1875 "y.tab.c"
     break;
 
   case 46: /* statement: return_statement  */
-#line 146 "parser.y"
+#line 189 "parser.y"
                        {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1837 "y.tab.c"
+#line 1881 "y.tab.c"
     break;
 
   case 47: /* statement: function_call_statement  */
-#line 147 "parser.y"
+#line 190 "parser.y"
                               {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 1843 "y.tab.c"
+#line 1887 "y.tab.c"
     break;
 
   case 48: /* assignment_statement: IDENTIFIER ASSIGN expression ';'  */
-#line 151 "parser.y"
+#line 194 "parser.y"
                                      {(yyval.nodePtr) = mknode("assign", mknode((yyvsp[-3].stringVal), NULL, NULL), (yyvsp[-1].nodePtr));}
-#line 1849 "y.tab.c"
+#line 1893 "y.tab.c"
     break;
 
   case 49: /* assignment_statement: IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';'  */
-#line 152 "parser.y"
+#line 195 "parser.y"
                                                             {
         char char_str[2];
         char_str[0] = (yyvsp[-1].charVal);
         char_str[1] = '\0';
         (yyval.nodePtr) = mknode("array_assign", mknode((yyvsp[-6].stringVal), (yyvsp[-4].nodePtr), NULL), mknode(char_str, NULL, NULL));
     }
-#line 1860 "y.tab.c"
+#line 1904 "y.tab.c"
     break;
 
   case 50: /* assignment_statement: MULT IDENTIFIER ASSIGN expression ';'  */
-#line 158 "parser.y"
+#line 201 "parser.y"
                                             {(yyval.nodePtr) = mknode("pointer_assign", mknode((yyvsp[-3].stringVal), NULL, NULL), (yyvsp[-1].nodePtr));}
-#line 1866 "y.tab.c"
+#line 1910 "y.tab.c"
     break;
 
   case 51: /* assignment_statement: IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';'  */
-#line 159 "parser.y"
+#line 202 "parser.y"
                                                  {(yyval.nodePtr) = mknode("ref_assign", mknode((yyvsp[-4].stringVal), NULL, NULL), mknode((yyvsp[-1].stringVal), NULL, NULL));}
-#line 1872 "y.tab.c"
+#line 1916 "y.tab.c"
     break;
 
   case 52: /* assignment_statement: IDENTIFIER ASSIGN NULL_TOKEN ';'  */
-#line 160 "parser.y"
+#line 203 "parser.y"
                                        {(yyval.nodePtr) = mknode("null_assign", mknode((yyvsp[-3].stringVal), NULL, NULL), mknode("null", NULL, NULL));}
-#line 1878 "y.tab.c"
+#line 1922 "y.tab.c"
     break;
 
   case 53: /* assignment_statement: IDENTIFIER '[' expression ']' ASSIGN INTEGER ';'  */
-#line 161 "parser.y"
+#line 204 "parser.y"
                                                        {
         char int_str[20];
         sprintf(int_str, "%d", (yyvsp[-1].intVal));
         (yyval.nodePtr) = mknode("array_assign", mknode((yyvsp[-6].stringVal), (yyvsp[-4].nodePtr), NULL), mknode(int_str, NULL, NULL));
     }
-#line 1888 "y.tab.c"
+#line 1932 "y.tab.c"
     break;
 
   case 54: /* assignment_statement: IDENTIFIER '[' expression ']' ASSIGN STRING_LITERAL ';'  */
-#line 166 "parser.y"
+#line 209 "parser.y"
                                                               {
         (yyval.nodePtr) = mknode("array_assign", mknode((yyvsp[-6].stringVal), (yyvsp[-4].nodePtr), NULL), mknode((yyvsp[-1].stringVal), NULL, NULL));
     }
-#line 1896 "y.tab.c"
-    break;
-
-  case 55: /* assignment_statement: IDENTIFIER '[' expression ']' ASSIGN expression ';'  */
-#line 169 "parser.y"
-                                                          {
-        (yyval.nodePtr) = mknode("array_assign", mknode((yyvsp[-6].stringVal), (yyvsp[-4].nodePtr), NULL), (yyvsp[-1].nodePtr));
-    }
-#line 1904 "y.tab.c"
-    break;
-
-  case 56: /* if_statement: IF expression ':' block_statement  */
-#line 175 "parser.y"
-                                      {(yyval.nodePtr) = mknode("if", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 1910 "y.tab.c"
-    break;
-
-  case 57: /* if_statement: IF expression ':' block_statement ELSE ':' block_statement  */
-#line 176 "parser.y"
-                                                                 {(yyval.nodePtr) = mknode("if-else", (yyvsp[-5].nodePtr), mknode("then", (yyvsp[-3].nodePtr), mknode("else", (yyvsp[0].nodePtr), NULL)));}
-#line 1916 "y.tab.c"
-    break;
-
-  case 58: /* if_statement: IF expression ':' block_statement ELIF expression ':' block_statement  */
-#line 177 "parser.y"
-                                                                            {(yyval.nodePtr) = mknode("if-elif", (yyvsp[-6].nodePtr), mknode("then", (yyvsp[-4].nodePtr), mknode("elif-cond", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr))));}
-#line 1922 "y.tab.c"
-    break;
-
-  case 59: /* if_statement: IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement  */
-#line 178 "parser.y"
-                                                                                                     {(yyval.nodePtr) = mknode("if-elif-else", (yyvsp[-9].nodePtr), mknode("then", (yyvsp[-7].nodePtr), mknode("elif-cond", (yyvsp[-5].nodePtr), mknode("elif-then", (yyvsp[-3].nodePtr), mknode("else", (yyvsp[0].nodePtr), NULL)))));}
-#line 1928 "y.tab.c"
-    break;
-
-  case 60: /* while_statement: WHILE expression ':' block_statement  */
-#line 182 "parser.y"
-                                         {(yyval.nodePtr) = mknode("while", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 1934 "y.tab.c"
-    break;
-
-  case 61: /* do_while_statement: DO ':' block_statement WHILE expression ';'  */
-#line 186 "parser.y"
-                                                {(yyval.nodePtr) = mknode("do-while", (yyvsp[-3].nodePtr), mknode("cond", (yyvsp[-1].nodePtr), NULL));}
 #line 1940 "y.tab.c"
     break;
 
+  case 55: /* assignment_statement: IDENTIFIER '[' expression ']' ASSIGN expression ';'  */
+#line 212 "parser.y"
+                                                          {
+        (yyval.nodePtr) = mknode("array_assign", mknode((yyvsp[-6].stringVal), (yyvsp[-4].nodePtr), NULL), (yyvsp[-1].nodePtr));
+    }
+#line 1948 "y.tab.c"
+    break;
+
+  case 56: /* if_statement: IF expression ':' block_statement  */
+#line 218 "parser.y"
+                                      {(yyval.nodePtr) = mknode("if", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
+#line 1954 "y.tab.c"
+    break;
+
+  case 57: /* if_statement: IF expression ':' block_statement ELSE ':' block_statement  */
+#line 219 "parser.y"
+                                                                 {(yyval.nodePtr) = mknode("if-else", (yyvsp[-5].nodePtr), mknode("then", (yyvsp[-3].nodePtr), mknode("else", (yyvsp[0].nodePtr), NULL)));}
+#line 1960 "y.tab.c"
+    break;
+
+  case 58: /* if_statement: IF expression ':' block_statement ELIF expression ':' block_statement  */
+#line 220 "parser.y"
+                                                                            {(yyval.nodePtr) = mknode("if-elif", (yyvsp[-6].nodePtr), mknode("then", (yyvsp[-4].nodePtr), mknode("elif-cond", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr))));}
+#line 1966 "y.tab.c"
+    break;
+
+  case 59: /* if_statement: IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement  */
+#line 221 "parser.y"
+                                                                                                     {(yyval.nodePtr) = mknode("if-elif-else", (yyvsp[-9].nodePtr), mknode("then", (yyvsp[-7].nodePtr), mknode("elif-cond", (yyvsp[-5].nodePtr), mknode("elif-then", (yyvsp[-3].nodePtr), mknode("else", (yyvsp[0].nodePtr), NULL)))));}
+#line 1972 "y.tab.c"
+    break;
+
+  case 60: /* while_statement: WHILE expression ':' block_statement  */
+#line 225 "parser.y"
+                                         {(yyval.nodePtr) = mknode("while", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
+#line 1978 "y.tab.c"
+    break;
+
+  case 61: /* do_while_statement: DO ':' block_statement WHILE expression ';'  */
+#line 229 "parser.y"
+                                                {(yyval.nodePtr) = mknode("do-while", (yyvsp[-3].nodePtr), mknode("cond", (yyvsp[-1].nodePtr), NULL));}
+#line 1984 "y.tab.c"
+    break;
+
   case 62: /* for_statement: FOR for_header ':' block_statement  */
-#line 190 "parser.y"
+#line 233 "parser.y"
                                        {(yyval.nodePtr) = mknode("for", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 1946 "y.tab.c"
+#line 1990 "y.tab.c"
     break;
 
   case 63: /* for_statement: FOR for_header ':' var block_statement  */
-#line 191 "parser.y"
+#line 234 "parser.y"
                                              {(yyval.nodePtr) = mknode("for", (yyvsp[-3].nodePtr), mknode("block", (yyvsp[0].nodePtr), (yyvsp[-1].nodePtr)));}
-#line 1952 "y.tab.c"
+#line 1996 "y.tab.c"
     break;
 
   case 64: /* for_header: '(' IDENTIFIER ASSIGN expression ';' expression ';' update_exp ')'  */
-#line 196 "parser.y"
+#line 239 "parser.y"
     {(yyval.nodePtr) = mknode("for-header", mknode("init", mknode((yyvsp[-7].stringVal), NULL, NULL), (yyvsp[-5].nodePtr)), 
                              mknode("loop", (yyvsp[-3].nodePtr), (yyvsp[-1].nodePtr)));}
-#line 1959 "y.tab.c"
+#line 2003 "y.tab.c"
     break;
 
   case 65: /* update_exp: IDENTIFIER ASSIGN expression  */
-#line 201 "parser.y"
+#line 244 "parser.y"
                                  {(yyval.nodePtr) = mknode("update", mknode((yyvsp[-2].stringVal), NULL, NULL), (yyvsp[0].nodePtr));}
-#line 1965 "y.tab.c"
+#line 2009 "y.tab.c"
     break;
 
   case 66: /* block_statement: BEGIN_TOKEN statements END  */
-#line 213 "parser.y"
+#line 256 "parser.y"
                                {(yyval.nodePtr) = mknode("block", (yyvsp[-1].nodePtr), NULL);}
-#line 1971 "y.tab.c"
+#line 2015 "y.tab.c"
     break;
 
   case 67: /* block_statement: var BEGIN_TOKEN statements END  */
-#line 214 "parser.y"
+#line 257 "parser.y"
                                      {(yyval.nodePtr) = mknode("block", (yyvsp[-1].nodePtr), (yyvsp[-3].nodePtr));}
-#line 1977 "y.tab.c"
+#line 2021 "y.tab.c"
     break;
 
   case 68: /* return_statement: RETURN expression ';'  */
-#line 218 "parser.y"
+#line 261 "parser.y"
                           {(yyval.nodePtr) = mknode("return_val", (yyvsp[-1].nodePtr), NULL);}
-#line 1983 "y.tab.c"
+#line 2027 "y.tab.c"
     break;
 
   case 69: /* return_statement: RETURN ';'  */
-#line 219 "parser.y"
+#line 262 "parser.y"
                  {(yyval.nodePtr) = mknode("return_void", NULL, NULL);}
-#line 1989 "y.tab.c"
+#line 2033 "y.tab.c"
     break;
 
   case 70: /* function_call_statement: function_call ';'  */
-#line 223 "parser.y"
+#line 266 "parser.y"
                       {(yyval.nodePtr) = (yyvsp[-1].nodePtr);}
-#line 1995 "y.tab.c"
+#line 2039 "y.tab.c"
     break;
 
   case 71: /* function_call_statement: IDENTIFIER ASSIGN function_call ';'  */
-#line 224 "parser.y"
+#line 267 "parser.y"
                                           {(yyval.nodePtr) = mknode("assign", mknode((yyvsp[-3].stringVal), NULL, NULL), (yyvsp[-1].nodePtr));}
-#line 2001 "y.tab.c"
+#line 2045 "y.tab.c"
     break;
 
   case 72: /* function_call: CALL IDENTIFIER '(' ')'  */
-#line 228 "parser.y"
+#line 271 "parser.y"
                             {(yyval.nodePtr) = mknode("call", mknode((yyvsp[-2].stringVal), NULL, NULL), NULL);}
-#line 2007 "y.tab.c"
+#line 2051 "y.tab.c"
     break;
 
   case 73: /* function_call: CALL IDENTIFIER '(' expr_list ')'  */
-#line 229 "parser.y"
+#line 272 "parser.y"
                                         {(yyval.nodePtr) = mknode("call", mknode((yyvsp[-3].stringVal), NULL, NULL), (yyvsp[-1].nodePtr));}
-#line 2013 "y.tab.c"
+#line 2057 "y.tab.c"
     break;
 
   case 74: /* expr_list: expression  */
-#line 233 "parser.y"
+#line 276 "parser.y"
                {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 2019 "y.tab.c"
+#line 2063 "y.tab.c"
     break;
 
   case 75: /* expr_list: expression ',' expr_list  */
-#line 234 "parser.y"
+#line 277 "parser.y"
                                {(yyval.nodePtr) = mknode("expr_list", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2025 "y.tab.c"
+#line 2069 "y.tab.c"
     break;
 
   case 76: /* expression: INTEGER  */
-#line 238 "parser.y"
+#line 281 "parser.y"
             {
         char int_str[20];
         sprintf(int_str, "%d", (yyvsp[0].intVal));
         (yyval.nodePtr) = mknode(int_str, NULL, NULL);
     }
-#line 2035 "y.tab.c"
+#line 2079 "y.tab.c"
     break;
 
   case 77: /* expression: REAL  */
-#line 243 "parser.y"
+#line 286 "parser.y"
            {
         char real_str[30];
         sprintf(real_str, "%f", (yyvsp[0].realVal));
         (yyval.nodePtr) = mknode(real_str, NULL, NULL);
     }
-#line 2045 "y.tab.c"
+#line 2089 "y.tab.c"
     break;
 
   case 78: /* expression: STRING_LITERAL  */
-#line 248 "parser.y"
+#line 291 "parser.y"
                      {(yyval.nodePtr) = mknode((yyvsp[0].stringVal), NULL, NULL);}
-#line 2051 "y.tab.c"
+#line 2095 "y.tab.c"
     break;
 
   case 79: /* expression: CHAR_LITERAL  */
-#line 249 "parser.y"
+#line 292 "parser.y"
                    {
         char char_str[2];
         char_str[0] = (yyvsp[0].charVal);
         char_str[1] = '\0';
         (yyval.nodePtr) = mknode(char_str, NULL, NULL);
     }
-#line 2062 "y.tab.c"
+#line 2106 "y.tab.c"
     break;
 
   case 80: /* expression: IDENTIFIER  */
-#line 255 "parser.y"
+#line 298 "parser.y"
                  {(yyval.nodePtr) = mknode((yyvsp[0].stringVal), NULL, NULL);}
-#line 2068 "y.tab.c"
+#line 2112 "y.tab.c"
     break;
 
   case 81: /* expression: expression PLUS expression  */
-#line 256 "parser.y"
+#line 299 "parser.y"
                                  {(yyval.nodePtr) = mknode("+", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2074 "y.tab.c"
+#line 2118 "y.tab.c"
     break;
 
   case 82: /* expression: expression MINUS expression  */
-#line 257 "parser.y"
+#line 300 "parser.y"
                                   {(yyval.nodePtr) = mknode("-", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2080 "y.tab.c"
+#line 2124 "y.tab.c"
     break;
 
   case 83: /* expression: expression MULT expression  */
-#line 258 "parser.y"
+#line 301 "parser.y"
                                  {(yyval.nodePtr) = mknode("*", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2086 "y.tab.c"
+#line 2130 "y.tab.c"
     break;
 
   case 84: /* expression: expression DIV expression  */
-#line 259 "parser.y"
+#line 302 "parser.y"
                                 {(yyval.nodePtr) = mknode("/", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2092 "y.tab.c"
+#line 2136 "y.tab.c"
     break;
 
   case 85: /* expression: expression MODULO expression  */
-#line 260 "parser.y"
+#line 303 "parser.y"
                                    {(yyval.nodePtr) = mknode("%", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2098 "y.tab.c"
+#line 2142 "y.tab.c"
     break;
 
   case 86: /* expression: MINUS expression  */
-#line 261 "parser.y"
+#line 304 "parser.y"
                        {(yyval.nodePtr) = mknode("unary-", (yyvsp[0].nodePtr), NULL);}
-#line 2104 "y.tab.c"
+#line 2148 "y.tab.c"
     break;
 
   case 87: /* expression: AMPERSAND IDENTIFIER  */
-#line 262 "parser.y"
+#line 305 "parser.y"
                            {(yyval.nodePtr) = mknode("&", mknode((yyvsp[0].stringVal), NULL, NULL), NULL);}
-#line 2110 "y.tab.c"
+#line 2154 "y.tab.c"
     break;
 
   case 88: /* expression: AMPERSAND IDENTIFIER '[' expression ']'  */
-#line 263 "parser.y"
+#line 306 "parser.y"
                                               {(yyval.nodePtr) = mknode("&", mknode("index", mknode((yyvsp[-3].stringVal), NULL, NULL), (yyvsp[-1].nodePtr)), NULL);}
-#line 2116 "y.tab.c"
+#line 2160 "y.tab.c"
     break;
 
   case 89: /* expression: MULT IDENTIFIER  */
-#line 264 "parser.y"
+#line 307 "parser.y"
                       {(yyval.nodePtr) = mknode("deref", mknode((yyvsp[0].stringVal), NULL, NULL), NULL);}
-#line 2122 "y.tab.c"
+#line 2166 "y.tab.c"
     break;
 
   case 90: /* expression: MULT expression  */
-#line 265 "parser.y"
+#line 308 "parser.y"
                       {(yyval.nodePtr) = mknode("*", (yyvsp[0].nodePtr), NULL);}
-#line 2128 "y.tab.c"
+#line 2172 "y.tab.c"
     break;
 
   case 91: /* expression: '(' expression ')'  */
-#line 266 "parser.y"
+#line 309 "parser.y"
                          {(yyval.nodePtr) = (yyvsp[-1].nodePtr);}
-#line 2134 "y.tab.c"
+#line 2178 "y.tab.c"
     break;
 
   case 92: /* expression: expression EQ expression  */
-#line 267 "parser.y"
+#line 310 "parser.y"
                                {(yyval.nodePtr) = mknode("==", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2140 "y.tab.c"
+#line 2184 "y.tab.c"
     break;
 
   case 93: /* expression: expression NE expression  */
-#line 268 "parser.y"
+#line 311 "parser.y"
                                {(yyval.nodePtr) = mknode("!=", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2146 "y.tab.c"
+#line 2190 "y.tab.c"
     break;
 
   case 94: /* expression: expression GE expression  */
-#line 269 "parser.y"
+#line 312 "parser.y"
                                {(yyval.nodePtr) = mknode(">=", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2152 "y.tab.c"
+#line 2196 "y.tab.c"
     break;
 
   case 95: /* expression: expression LE expression  */
-#line 270 "parser.y"
+#line 313 "parser.y"
                                {(yyval.nodePtr) = mknode("<=", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2158 "y.tab.c"
+#line 2202 "y.tab.c"
     break;
 
   case 96: /* expression: expression GT expression  */
-#line 271 "parser.y"
+#line 314 "parser.y"
                                {(yyval.nodePtr) = mknode(">", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2164 "y.tab.c"
+#line 2208 "y.tab.c"
     break;
 
   case 97: /* expression: expression LT expression  */
-#line 272 "parser.y"
+#line 315 "parser.y"
                                {(yyval.nodePtr) = mknode("<", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2170 "y.tab.c"
+#line 2214 "y.tab.c"
     break;
 
   case 98: /* expression: expression AND expression  */
-#line 273 "parser.y"
+#line 316 "parser.y"
                                 {(yyval.nodePtr) = mknode("and", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2176 "y.tab.c"
+#line 2220 "y.tab.c"
     break;
 
   case 99: /* expression: expression OR expression  */
-#line 274 "parser.y"
+#line 317 "parser.y"
                                {(yyval.nodePtr) = mknode("or", (yyvsp[-2].nodePtr), (yyvsp[0].nodePtr));}
-#line 2182 "y.tab.c"
+#line 2226 "y.tab.c"
     break;
 
   case 100: /* expression: IDENTIFIER '[' expression ']'  */
-#line 275 "parser.y"
+#line 318 "parser.y"
                                     {(yyval.nodePtr) = mknode("index", mknode((yyvsp[-3].stringVal), NULL, NULL), (yyvsp[-1].nodePtr));}
-#line 2188 "y.tab.c"
+#line 2232 "y.tab.c"
     break;
 
   case 101: /* expression: function_call  */
-#line 276 "parser.y"
+#line 319 "parser.y"
                     {(yyval.nodePtr) = (yyvsp[0].nodePtr);}
-#line 2194 "y.tab.c"
+#line 2238 "y.tab.c"
     break;
 
 
-#line 2198 "y.tab.c"
+#line 2242 "y.tab.c"
 
       default: break;
     }
@@ -2387,7 +2431,7 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 279 "parser.y"
+#line 322 "parser.y"
 
 
 int main()

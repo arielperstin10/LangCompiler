@@ -103,6 +103,8 @@ ID [A-Za-z][A-Za-z0-9_]*
 
 [ \t\r\n]+        { /* Skip whitespace */ }
 
+[\xEF\xBB\xBF]    { /* Skip UTF-8 BOM markers */ }
+
 .                 { fprintf(stderr, "Unrecognized character: %s\n", yytext); }
 
 %%
