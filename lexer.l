@@ -44,6 +44,10 @@ ID [A-Za-z][A-Za-z0-9_]*
 "or"              { return OR; }
 "type"            { return TYPE; }
 "_main_"          { return MAIN; }
+"_Main_"|"_MAIN_"|"_mAIN_"|"_mAIn_"|"_maIN_"|"_maiN_"|"_mAiN_"|"_MaiN_"|"_MaIn_"|"_MAiN_"|"_mAiN_"|"_mAIn_"|"_maIN_"|"_maiN_"|"_mAIN_"|"_Main_" {
+    fprintf(stderr, "Error: Main function must be exactly '_main_' (case sensitive)\n");
+    return YYerror;
+}
 
 "=="              { return EQ; }
 "!="              { return NE; }
