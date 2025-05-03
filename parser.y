@@ -3,11 +3,29 @@
     #include <stdlib.h>
     #include <string.h>
 
+    #define MAX_PARAMS 10
+
     int yylex();
     int yyerror(const char* s);
     extern int yylineno;
     extern char* yytext;
     
+    typedef enum {
+        TYPE_INT, TYPE_CHAR, TYPE_REAL, TYPE_STRING, TYPE_BOOL,
+        TYPE_INT_PTR, TYPE_CHAR_PTR, TYPE_REAL_PTR, TYPE_INVALID
+    } VarType;
+
+    typedef struct Symbol {
+        char* name;
+        VarType type;
+        int is_function;
+        VarType return_type;
+        VarType param_types[MAX_PARAMS];
+        int param_count;
+        int scope_level;
+        struct Symbol* next;
+    } Symbol;
+
     typedef struct node
     {
         char* token;
@@ -17,6 +35,15 @@
     node* mknode(char* token, node* left, node* right);
     void printTree(node* tree, int level);
     void visualize_ast(node* root, const char* branch_prefix, int is_left_branch);
+    VarType string_to_type(const char* str);
+    void insert_symbol(char* name, VarType type, int is_function, VarType return_type, VarType* param_types, int param_count);
+    void enter_scope();
+    void exit_scope();
+
+    node* root = NULL;
+    Symbol* symbol_table = NULL;
+    int current_scope_level = 0;
+    int main_count = 0;
 %}
 
 %union {
@@ -25,7 +52,12 @@
     char charVal;
     char* stringVal;
     struct node* nodePtr;
+    VarType typeVal;
+    VarType paramList[MAX_PARAMS];
 }
+
+%type <typeVal> type_specifier return_type
+%type <paramList> param_list
 
 %token <intVal> INTEGER
 %token <realVal> REAL
@@ -49,18 +81,31 @@
 %type <nodePtr> code functions function parameters parameter_list parameter var declaration_list 
 %type <nodePtr> declaration type id_list statements statement assignment_statement if_statement 
 %type <nodePtr> while_statement do_while_statement for_statement for_header update_exp condition
-%type <nodePtr> block_statement return_statement function_call_statement function_call expression
+%type <nodePtr> block_statement scope_entry return_statement function_call_statement function_call expression scoped_block
 %type <nodePtr> expr_list nested_function
 
 %%
 
-code: functions {$$ = mknode("code", $1, NULL); visualize_ast($1, "", 1);};
+code: functions {root = mknode("code", $1, NULL); $$ = root;};
 
 functions: function {$$ = $1;}
         | function functions {$$ = mknode("functions", $1, $2);}
         ;
 
-function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));}
+function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
+            node* stmt = $8;
+            while (stmt) 
+            {
+                if (strcmp(stmt->token, "return_val") == 0) 
+                {
+                    yyerror("Semantic Error: _main_ must not contain return statements.");
+                    YYERROR;
+                }
+                stmt = stmt->right;
+            }
+            insert_symbol("_main_", TYPE_INVALID, 1, TYPE_INVALID, NULL, 0); 
+            $$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));
+        }
         | DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {
             // Check if last statement is a return
             node* last_stmt = $11;
@@ -71,6 +116,13 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC
                 yyerror("Error: function with RETURNS must end with a return statement");
                 YYERROR;
             }
+            if (strcmp($2, "_main_") == 0) 
+            {
+                yyerror("Semantic Error: _main_ must not return a value.");
+                YYERROR;
+            }
+            VarType ret_type = string_to_type($8->token);
+            insert_symbol($2, TYPE_INVALID, 1, ret_type, NULL, 0);
             $$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
         } 
         | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END {
@@ -83,6 +135,12 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {$$ = mknode("FUNC
                 yyerror("Error: function without RETURNS must not have a return statement");
                 YYERROR;
             }
+            if (strcmp($2, "_main_") == 0 && $4 != NULL) 
+            {
+                yyerror("Semantic Error: _main_ must not have parameters.");
+                YYERROR;
+            }
+            insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, NULL, 0);
             $$ = mknode("FUNC", mknode($2, $4, NULL), mknode("body", $9, NULL));
         }
         ;
@@ -105,7 +163,17 @@ declaration_list: declaration {$$ = $1;}
     | declaration declaration_list {$$ = mknode("decls", $1, $2);}
     ;
 
-declaration: TYPE type ':' id_list ';' {$$ = mknode("DECL", $2, $4);};
+declaration: TYPE type ':' id_list ';' {
+        VarType vtype = string_to_type($2->token);
+        node* ids = $4;
+        while (ids) 
+        {
+            char* var_name = ids->token;
+            insert_symbol(var_name, vtype, 0, TYPE_INVALID, NULL, 0);
+            ids = ids->right;
+        }
+        $$ = mknode("DECL", $2, $4);
+    };
 
 type:
     BOOL       { $$ = mknode("BOOL", NULL, NULL); }
@@ -252,11 +320,31 @@ condition:
     | FALSE {$$ = mknode("false", NULL, NULL);}
     ;
 
+scope_entry: /* nothing */ { enter_scope(); $$ = NULL; };
+
+scoped_block:
+    scope_entry BEGIN_TOKEN END {
+        exit_scope();
+        $$ = mknode("block", NULL, NULL);
+    }
+  | scope_entry BEGIN_TOKEN statements END {
+        exit_scope();
+        $$ = mknode("block", $3, NULL);
+    }
+  | scope_entry var BEGIN_TOKEN END {
+        exit_scope();
+        $$ = mknode("block", NULL, $2);
+    }
+  | scope_entry var BEGIN_TOKEN statements END {
+        exit_scope();
+        $$ = mknode("block", $4, $2);
+    }
+;
+
 block_statement:
-    BEGIN_TOKEN statements END {$$ = mknode("block", $2, NULL);}
-    | var BEGIN_TOKEN statements END {$$ = mknode("block", $3, $1);}
-    ;
-    
+    scoped_block { $$ = $1; }
+;
+
 return_statement:
     RETURN expression ';' {$$ = mknode("return_val", $2, NULL);}
     | RETURN ';' {$$ = mknode("return_void", NULL, NULL);}
@@ -323,7 +411,21 @@ expression:
 
 int main()
 {
-    yyparse();
+    if (yyparse() == 0) {
+        if (main_count == 0) 
+        {
+            fprintf(stderr, "Semantic Error: Missing '_main_' function.\n");
+            return 1;
+        } else if (main_count > 1) 
+        {
+            fprintf(stderr, "Semantic Error: Multiple '_main_' functions are not allowed.\n");
+            return 1;
+        }
+        visualize_ast(root, "", 1);
+        printf("Semantic checks passed.\n");
+    }
+
+    
     return 0;
 }
 
@@ -403,3 +505,66 @@ void visualize_ast(node* root, const char* branch_prefix, int is_left_branch) {
         visualize_ast(root->right, child_prefix, 0);
     }
 }
+
+// Part 2
+VarType string_to_type(const char* str) 
+{
+    if (strcmp(str, "int") == 0) return TYPE_INT;
+    if (strcmp(str, "char") == 0) return TYPE_CHAR;
+    if (strcmp(str, "real") == 0) return TYPE_REAL;
+    if (strcmp(str, "string") == 0) return TYPE_STRING;
+    if (strcmp(str, "bool") == 0) return TYPE_BOOL;
+    if (strcmp(str, "int*") == 0) return TYPE_INT_PTR;
+    if (strcmp(str, "char*") == 0) return TYPE_CHAR_PTR;
+    if (strcmp(str, "real*") == 0) return TYPE_REAL_PTR;
+    return TYPE_INVALID;
+}
+
+void insert_symbol(char* name, VarType type, int is_function, VarType return_type, VarType* param_types, int param_count) 
+{
+    // Check for redefinition in the same scope
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (sym->scope_level == current_scope_level && strcmp(sym->name, name) == 0) {
+            fprintf(stderr, "Semantic Error: Redefinition of '%s' in the same scope.\n", name);
+            exit(1);
+        }
+        sym = sym->next;
+    }
+
+    // Create new symbol
+    Symbol* new_sym = (Symbol*)malloc(sizeof(Symbol));
+    new_sym->name = strdup(name);
+    new_sym->type = type;
+    new_sym->is_function = is_function;
+    new_sym->return_type = return_type;
+    new_sym->param_count = param_count;
+    for (int i = 0; i < param_count; i++) {
+        new_sym->param_types[i] = param_types[i];
+    }
+    new_sym->scope_level = current_scope_level;
+    new_sym->next = symbol_table;
+    symbol_table = new_sym;
+
+    // Handle main function count
+    if (is_function && strcmp(name, "_main_") == 0) {
+        main_count++;
+    }
+}
+
+void enter_scope() {
+    current_scope_level++;
+}
+
+void exit_scope() {
+    Symbol* sym = symbol_table;
+    while (sym && sym->scope_level == current_scope_level) {
+        Symbol* to_delete = sym;
+        sym = sym->next;
+        free(to_delete->name);
+        free(to_delete);
+    }
+    symbol_table = sym;
+    current_scope_level--;
+}
+
