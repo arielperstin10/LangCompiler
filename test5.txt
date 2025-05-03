@@ -1,0 +1,7 @@
+def _main_():
+begin
+    def getGrade(par1 int:score): returns char
+    begin
+        return 'A';
+    end
+end

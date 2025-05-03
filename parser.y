@@ -2,6 +2,7 @@
     #include <stdio.h>
     #include <stdlib.h>
     #include <string.h>
+    #include <ctype.h>
 
     #define MAX_PARAMS 10
 
@@ -39,6 +40,14 @@
     void insert_symbol(char* name, VarType type, int is_function, VarType return_type, VarType* param_types, int param_count);
     void enter_scope();
     void exit_scope();
+    int is_function_defined(const char* name);
+    int is_variable_defined(const char* name);
+    int get_function_param_count(const char* name);
+    int count_params(node* param_node);
+    void extract_param_types(node* param_node, VarType* types);
+    VarType infer_type(node* expr);
+    const char* type_to_string(VarType type);
+    Symbol* find_function_symbol(const char* name);
 
     node* root = NULL;
     Symbol* symbol_table = NULL;
@@ -122,7 +131,13 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
                 YYERROR;
             }
             VarType ret_type = string_to_type($8->token);
-            insert_symbol($2, TYPE_INVALID, 1, ret_type, NULL, 0);
+
+            int param_count = count_params($4);
+            VarType param_types[MAX_PARAMS];
+            extract_param_types($4, param_types);
+            insert_symbol($2, TYPE_INVALID, 1, ret_type, param_types, param_count);
+
+            
             $$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
         } 
         | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END {
@@ -140,7 +155,10 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
                 yyerror("Semantic Error: _main_ must not have parameters.");
                 YYERROR;
             }
-            insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, NULL, 0);
+            int param_count = count_params($4);
+            VarType param_types[MAX_PARAMS];
+            extract_param_types($4, param_types);
+            insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, param_types, param_count);
             $$ = mknode("FUNC", mknode($2, $4, NULL), mknode("body", $9, NULL));
         }
         ;
@@ -176,14 +194,14 @@ declaration: TYPE type ':' id_list ';' {
     };
 
 type:
-    BOOL       { $$ = mknode("BOOL", NULL, NULL); }
-    | CHAR       { $$ = mknode("CHAR", NULL, NULL); }
-    | INT        { $$ = mknode("INT", NULL, NULL); }
-    | REAL_TYPE  { $$ = mknode("REAL", NULL, NULL); }
-    | STRING     { $$ = mknode("STRING", NULL, NULL); }
-    | INT_PTR    { $$ = mknode("INT_PTR", NULL, NULL); }
-    | CHAR_PTR   { $$ = mknode("CHAR_PTR", NULL, NULL); }
-    | REAL_PTR   { $$ = mknode("REAL_PTR", NULL, NULL); }
+    BOOL       { $$ = mknode("bool", NULL, NULL); }
+    | CHAR       { $$ = mknode("char", NULL, NULL); }
+    | INT        { $$ = mknode("int", NULL, NULL); }
+    | REAL_TYPE  { $$ = mknode("real", NULL, NULL); }
+    | STRING     { $$ = mknode("string", NULL, NULL); }
+    | INT_PTR    { $$ = mknode("int*", NULL, NULL); }
+    | CHAR_PTR   { $$ = mknode("char*", NULL, NULL); }
+    | REAL_PTR   { $$ = mknode("real*", NULL, NULL); }
     ;
 
 id_list: IDENTIFIER {$$ = mknode($1, NULL, NULL);}
@@ -212,7 +230,8 @@ id_list: IDENTIFIER {$$ = mknode($1, NULL, NULL);}
     }
     ;
 
-statements: statement {$$ = $1;}
+statements:  /* empty */ { $$ = NULL; } 
+    | statement {$$ = $1;}
     | statement statements {$$ = mknode("statements", $1, $2);}
     | nested_function {$$ = $1;}
     | nested_function statements {$$ = mknode("statements", $1, $2);}
@@ -220,10 +239,19 @@ statements: statement {$$ = $1;}
 
 
 nested_function: 
-    DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END
+    DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN 
+    {
+        VarType ret_type = string_to_type($8->token);
+        int param_count = count_params($4);
+        VarType param_types[MAX_PARAMS];
+        extract_param_types($4, param_types);
+        insert_symbol($2, TYPE_INVALID, 1, ret_type, param_types, param_count);
+
+    }
+    statements END
     {
         // Check if last statement is a return
-        node* last_stmt = $11;
+        node* last_stmt = $12;
         while (last_stmt && last_stmt->right) {
             last_stmt = last_stmt->right;
         }
@@ -231,12 +259,22 @@ nested_function:
             yyerror("Error: function with RETURNS must end with a return statement");
             YYERROR;
         }
-        $$ = mknode("nested_func", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
+        VarType declared_ret_type = string_to_type($8->token);
+
+        $$ = mknode("nested_func", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $12, NULL));
     }
-    | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END
+    | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN 
+    {
+        int param_count = count_params($4);
+        VarType param_types[MAX_PARAMS];
+        extract_param_types($4, param_types);
+        insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, param_types, param_count);
+
+    }
+    statements END
     {
         // Check if last statement is a return
-        node* last_stmt = $9;
+        node* last_stmt = $10;
         while (last_stmt && last_stmt->right) {
             last_stmt = last_stmt->right;
         }
@@ -244,7 +282,7 @@ nested_function:
             yyerror("Error: function without RETURNS must not have a return statement");
             YYERROR;
         }
-        $$ = mknode("nested_func", mknode($2, $4, NULL), mknode("body", $9, NULL));
+        $$ = mknode("nested_func", mknode($2, $4, NULL), mknode("body", $10, NULL));
     }
     ;
 
@@ -259,14 +297,30 @@ statement: assignment_statement {$$ = $1;}
     ;
 
 assignment_statement:
-    IDENTIFIER ASSIGN expression ';' {$$ = mknode("assign", mknode($1, NULL, NULL), $3);}
+    IDENTIFIER ASSIGN expression ';' 
+    {
+        if (!is_variable_defined($1)) 
+        {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
+        $$ = mknode("assign", mknode($1, NULL, NULL), $3);
+    }
     | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {
         char char_str[2];
         char_str[0] = $6;
         char_str[1] = '\0';
         $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(char_str, NULL, NULL));
     }
-    | MULT IDENTIFIER ASSIGN expression ';' {$$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);}
+    | MULT IDENTIFIER ASSIGN expression ';' 
+    {
+        if (!is_variable_defined($2)) 
+        {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
+            exit(1);
+        }
+        $$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);
+    }
     | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' {$$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));}
     | IDENTIFIER ASSIGN NULL_TOKEN ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
     | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {
@@ -356,8 +410,65 @@ function_call_statement:
     ;
 
 function_call:
-    CALL IDENTIFIER '(' ')' {$$ = mknode("call", mknode($2, NULL, NULL), NULL);}
-    | CALL IDENTIFIER '(' expr_list ')' {$$ = mknode("call", mknode($2, NULL, NULL), $4);}
+    CALL IDENTIFIER '(' ')' 
+    {
+        if (!is_function_defined($2)) 
+        {
+            fprintf(stderr, "Semantic Error: Function '%s' used before its definition.\n", $2);
+            exit(1);
+        }
+        int expected = get_function_param_count($2);
+        if (expected != 0) 
+        {
+            fprintf(stderr, "Semantic Error: Function '%s' called with incorrect number of arguments (expected %d, got 0).\n", $2, expected);
+            exit(1);
+        }
+        $$ = mknode("call", mknode($2, NULL, NULL), NULL);
+    }
+    | CALL IDENTIFIER '(' expr_list ')' 
+    {
+        if (!is_function_defined($2)) 
+        {
+            fprintf(stderr, "Semantic Error: Function '%s' used before its definition.\n", $2);
+            exit(1);
+        }
+
+        int count = 1;
+        node* temp = $4;
+        while (temp && strcmp(temp->token, "expr_list") == 0) 
+        {
+            count++;
+            temp = temp->right;
+        }
+
+        Symbol* func = find_function_symbol($2);
+        if (!func) {
+            fprintf(stderr, "Semantic Error: Function '%s' not found.\n", $2);
+            exit(1);
+        }
+
+        if (func->param_count != count) {
+            fprintf(stderr, "Semantic Error: Function '%s' called with incorrect number of arguments (expected %d, got %d).\n",
+                    $2, func->param_count, count);
+            exit(1);
+        }
+
+        node* expr = $4;
+        int i = 0;
+        while (expr && i < func->param_count) {
+            node* current_expr = (strcmp(expr->token, "expr_list") == 0) ? expr->left : expr;
+            VarType actual_type = infer_type(current_expr);
+            if (actual_type != func->param_types[i]) {
+                fprintf(stderr, "Semantic Error: Function '%s', argument %d type mismatch (expected %s, got %s).\n",
+                        $2, i + 1, type_to_string(func->param_types[i]), type_to_string(actual_type));
+                exit(1);
+            }
+            expr = (strcmp(expr->token, "expr_list") == 0) ? expr->right : NULL;
+            i++;
+        }
+        
+        $$ = mknode("call", mknode($2, NULL, NULL), $4);
+    }
     ;
 
 expr_list: 
@@ -376,23 +487,47 @@ expression:
         sprintf(real_str, "%f", $1);
         $$ = mknode(real_str, NULL, NULL);
     }
-    | STRING_LITERAL {$$ = mknode($1, NULL, NULL);}
+    | STRING_LITERAL {$$ = mknode("STRING_LITERAL", mknode($1, NULL, NULL), NULL);}
     | CHAR_LITERAL {
         char char_str[2];
         char_str[0] = $1;
         char_str[1] = '\0';
         $$ = mknode(char_str, NULL, NULL);
     }
-    | IDENTIFIER {$$ = mknode($1, NULL, NULL);}
+    | IDENTIFIER {
+        if (!is_variable_defined($1)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
+        $$ = mknode($1, NULL, NULL);
+    }
     | expression PLUS expression {$$ = mknode("+", $1, $3);}
     | expression MINUS expression {$$ = mknode("-", $1, $3);}
     | expression MULT expression {$$ = mknode("*", $1, $3);}
     | expression DIV expression {$$ = mknode("/", $1, $3);}
     | expression MODULO expression {$$ = mknode("%", $1, $3);}
     | MINUS expression {$$ = mknode("unary-", $2, NULL);}
-    | AMPERSAND IDENTIFIER {$$ = mknode("&", mknode($2, NULL, NULL), NULL);}
-    | AMPERSAND IDENTIFIER '[' expression ']' {$$ = mknode("&", mknode("index", mknode($2, NULL, NULL), $4), NULL);}
-    | MULT IDENTIFIER {$$ = mknode("deref", mknode($2, NULL, NULL), NULL);}
+    | AMPERSAND IDENTIFIER {
+        if (!is_variable_defined($2)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
+            exit(1);
+        }
+        $$ = mknode("&", mknode($2, NULL, NULL), NULL);
+    }
+    | AMPERSAND IDENTIFIER '[' expression ']' {
+        if (!is_variable_defined($2)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
+            exit(1);
+        }
+        $$ = mknode("&", mknode("index", mknode($2, NULL, NULL), $4), NULL);
+    }
+    | MULT IDENTIFIER {
+        if (!is_variable_defined($2)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
+            exit(1);
+        }
+        $$ = mknode("deref", mknode($2, NULL, NULL), NULL);
+    }
     | MULT expression {$$ = mknode("*", $2, NULL);}
     | '(' expression ')' {$$ = $2;}
     | expression EQ expression {$$ = mknode("==", $1, $3);}
@@ -403,7 +538,13 @@ expression:
     | expression LT expression {$$ = mknode("<", $1, $3);}
     | expression AND expression {$$ = mknode("and", $1, $3);}
     | expression OR expression {$$ = mknode("or", $1, $3);}
-    | IDENTIFIER '[' expression ']' {$$ = mknode("index", mknode($1, NULL, NULL), $3);}
+    | IDENTIFIER '[' expression ']' {
+        if (!is_variable_defined($1)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
+        $$ = mknode("index", mknode($1, NULL, NULL), $3);
+    }
     | function_call {$$ = $1;} /* Allow function calls in expressions */
     ;
 
@@ -568,3 +709,139 @@ void exit_scope() {
     current_scope_level--;
 }
 
+int is_function_defined(const char* name) {
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (sym->is_function && strcmp(sym->name, name) == 0) {
+            return 1; // Found
+        }
+        sym = sym->next;
+    }
+    return 0; // Not found
+}
+
+int is_variable_defined(const char* name) {
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (!sym->is_function && strcmp(sym->name, name) == 0) {
+            return 1;
+        }
+        sym = sym->next;
+    }
+    return 0;
+}
+
+int get_function_param_count(const char* name) 
+{
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (sym->is_function && strcmp(sym->name, name) == 0) {
+            return sym->param_count;
+        }
+        sym = sym->next;
+    }
+    return -1; // Not found
+}
+
+int count_params(node* param_node) {
+    int count = 0;
+    node* temp = param_node;
+    while (temp) {
+        count++;
+        temp = temp->right;
+    }
+    return count;
+}
+
+void extract_param_types(node* param_node, VarType* types) 
+{
+    int i = 0;
+
+    void helper(node* n) {
+        if (!n || i >= MAX_PARAMS) return;
+
+        if (strcmp(n->token, "PARAMS") == 0) {
+            helper(n->left);
+            helper(n->right);
+        } else {
+            if (n->left && n->left->token)
+                types[i++] = string_to_type(n->left->token);
+            else
+                types[i++] = TYPE_INVALID;
+        }
+    }
+
+    helper(param_node);
+}
+
+VarType infer_type(node* expr) {
+    if (!expr || !expr->token) return TYPE_INVALID;
+
+    // Integer literal
+    if (strspn(expr->token, "0123456789") == strlen(expr->token)) {
+        return TYPE_INT;
+    }
+
+    // Real literal
+    if (strchr(expr->token, '.') != NULL) {
+        return TYPE_REAL;
+    }
+
+    // Variable lookup
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (!sym->is_function && strcmp(sym->name, expr->token) == 0) {
+            return sym->type;
+        }
+        sym = sym->next;
+    }
+
+    // Pointer dereference
+    if (strcmp(expr->token, "deref") == 0 && expr->left) {
+        VarType inner = infer_type(expr->left);
+        if (inner == TYPE_INT_PTR) return TYPE_INT;
+        if (inner == TYPE_CHAR_PTR) return TYPE_CHAR;
+        if (inner == TYPE_REAL_PTR) return TYPE_REAL;
+    }
+
+    // Address-of operator
+    if (strcmp(expr->token, "&") == 0 && expr->left) {
+        VarType inner = infer_type(expr->left);
+        if (inner == TYPE_INT) return TYPE_INT_PTR;
+        if (inner == TYPE_CHAR) return TYPE_CHAR_PTR;
+        if (inner == TYPE_REAL) return TYPE_REAL_PTR;
+    }
+
+    // String literal (e.g., "hello")
+    if (strcmp(expr->token, "STRING_LITERAL") == 0 && expr->left && expr->left->token) {
+        return TYPE_STRING;
+    }   
+
+    return TYPE_INVALID;
+}
+
+
+const char* type_to_string(VarType type) {
+    switch (type) {
+        case TYPE_INT: return "int";
+        case TYPE_CHAR: return "char";
+        case TYPE_REAL: return "real";
+        case TYPE_STRING: return "string";
+        case TYPE_BOOL: return "bool";
+        case TYPE_INT_PTR: return "int*";
+        case TYPE_CHAR_PTR: return "char*";
+        case TYPE_REAL_PTR: return "real*";
+        default: return "unknown";
+    }
+}
+
+Symbol* find_function_symbol(const char* name) {
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (sym->is_function && strcmp(sym->name, name) == 0) {
+            return sym;
+        }
+        sym = sym->next;
+    }
+    return NULL;
+}

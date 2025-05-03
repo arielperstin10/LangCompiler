@@ -1,11 +1,8 @@
+def foo(par1 int:a; par2 real:b; par3 char:c):
+begin
+end
+
 def _main_():
 begin
-    var
-        type int:x;
-    begin
-        if x > 0:
-        begin
-            x = 1;
-        end
-    end
+    call foo(10, "hello", 'x');
 end
