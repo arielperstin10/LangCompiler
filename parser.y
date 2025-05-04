@@ -116,26 +116,44 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
             $$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));
         }
         | DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {
-            // Check if last statement is a return
             node* last_stmt = $11;
-            while (last_stmt && last_stmt->right) {
+            while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->right) {
                 last_stmt = last_stmt->right;
             }
-            if (!last_stmt || strcmp(last_stmt->token, "return_val") != 0) {
+            node* final = (last_stmt && strcmp(last_stmt->token, "statements") == 0) ? last_stmt->left : last_stmt;
+
+            if (!final || (strcmp(final->token, "return_val") != 0 && strcmp(final->token, "return_void") != 0)) {
                 yyerror("Error: function with RETURNS must end with a return statement");
                 YYERROR;
             }
-            if (strcmp($2, "_main_") == 0) 
-            {
+
+            if (strcmp($2, "_main_") == 0) {
                 yyerror("Semantic Error: _main_ must not return a value.");
                 YYERROR;
             }
-            VarType ret_type = string_to_type($8->token);
 
-            int param_count = count_params($4);
+            VarType declared_type = string_to_type($8->token);
             VarType param_types[MAX_PARAMS];
+            int param_count = count_params($4);
             extract_param_types($4, param_types);
-            insert_symbol($2, TYPE_INVALID, 1, ret_type, param_types, param_count);
+            insert_symbol($2, TYPE_INVALID, 1, declared_type, param_types, param_count);
+
+            if (declared_type == TYPE_STRING) {
+                fprintf(stderr, "Semantic Error: functions cannot return type 'string'.\n");
+                exit(1);
+            }
+
+            if (strcmp(final->token, "return_void") == 0) {
+                fprintf(stderr, "Semantic Error: function declared to return '%s' but returned nothing.\n", type_to_string(declared_type));
+                exit(1);
+            }
+
+            VarType actual_type = infer_type(final->left);
+            if (actual_type != declared_type) {
+                fprintf(stderr, "Semantic Error: return type mismatch — expected '%s', got '%s'.\n",
+                        type_to_string(declared_type), type_to_string(actual_type));
+                exit(1);
+            }
 
             
             $$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
@@ -250,17 +268,43 @@ nested_function:
     }
     statements END
     {
-        // Check if last statement is a return
+        VarType ret_type = string_to_type($8->token);
+        int param_count = count_params($4);
+        VarType param_types[MAX_PARAMS];
+        extract_param_types($4, param_types);
+        insert_symbol($2, TYPE_INVALID, 1, ret_type, param_types, param_count);
+    }
+    statements END
+    {
         node* last_stmt = $12;
-        while (last_stmt && last_stmt->right) {
+        while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->right) {
             last_stmt = last_stmt->right;
         }
-        if (!last_stmt || strcmp(last_stmt->token, "return_val") != 0) {
+        node* final = (last_stmt && strcmp(last_stmt->token, "statements") == 0) ? last_stmt->left : last_stmt;
+
+        if (!final || (strcmp(final->token, "return_val") != 0 && strcmp(final->token, "return_void") != 0)) {
             yyerror("Error: function with RETURNS must end with a return statement");
             YYERROR;
         }
-        VarType declared_ret_type = string_to_type($8->token);
 
+        VarType declared_type = string_to_type($8->token);
+
+        if (declared_type == TYPE_STRING) {
+            fprintf(stderr, "Semantic Error: functions cannot return type 'string'.\n");
+            exit(1);
+        }
+
+        if (strcmp(final->token, "return_void") == 0) {
+            fprintf(stderr, "Semantic Error: function declared to return '%s' but returned nothing.\n", type_to_string(declared_type));
+            exit(1);
+        }
+
+        VarType actual_type = infer_type(final->left);
+        if (actual_type != declared_type) {
+            fprintf(stderr, "Semantic Error: return type mismatch — expected '%s', got '%s'.\n",
+                    type_to_string(declared_type), type_to_string(actual_type));
+            exit(1);
+        }
         $$ = mknode("nested_func", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $12, NULL));
     }
     | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN 
@@ -307,6 +351,11 @@ assignment_statement:
         $$ = mknode("assign", mknode($1, NULL, NULL), $3);
     }
     | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {
+        VarType index_type = infer_type($3);
+        if (index_type != TYPE_INT) {
+            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
         char char_str[2];
         char_str[0] = $6;
         char_str[1] = '\0';
@@ -324,31 +373,110 @@ assignment_statement:
     | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' {$$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));}
     | IDENTIFIER ASSIGN NULL_TOKEN ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
     | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {
+        VarType index_type = infer_type($3);
+        if (index_type != TYPE_INT) {
+            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
         char int_str[20];
         sprintf(int_str, "%d", $6);
         $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(int_str, NULL, NULL));
     }
     | IDENTIFIER '[' expression ']' ASSIGN STRING_LITERAL ';' {
+        VarType index_type = infer_type($3);
+        if (index_type != TYPE_INT) {
+            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
         $$ = mknode("array_assign", mknode($1, $3, NULL), mknode($6, NULL, NULL));
     }
     | IDENTIFIER '[' expression ']' ASSIGN expression ';' {
+        VarType index_type = infer_type($3);
+        if (index_type != TYPE_INT) {
+            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
         $$ = mknode("array_assign", mknode($1, $3, NULL), $6);
     }
     ;
 
 if_statement:
-    IF expression ':' block_statement {$$ = mknode("if", $2, $4);}
-    | IF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if-else", $2, mknode("then", $4, mknode("else", $7, NULL)));}
-    | IF expression ':' block_statement ELIF expression ':' block_statement {$$ = mknode("if-elif", $2, mknode("then", $4, mknode("elif-cond", $6, $8)));}
-    | IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement {$$ = mknode("if-elif-else", $2, mknode("then", $4, mknode("elif-cond", $6, mknode("elif-then", $8, mknode("else", $11, NULL)))));}
-    ;
+    IF expression ':' block_statement 
+    {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) 
+        {
+            fprintf(stderr, "Semantic Error: condition in 'if' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("if", $2, $4);
+    }
+    | IF expression ':' block_statement ELSE ':' block_statement 
+    {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) 
+        {
+            fprintf(stderr, "Semantic Error: condition in 'if-else' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("if-else", $2, mknode("then", $4, mknode("else", $7, NULL)));
+    }
+    | IF expression ':' block_statement ELIF expression ':' block_statement 
+    {
+        VarType if_cond_type = infer_type($2);
+        VarType elif_cond_type = infer_type($6);
+        if (if_cond_type != TYPE_BOOL) 
+        {
+            fprintf(stderr, "Semantic Error: condition in 'if' must be of type 'bool', got '%s'.\n", type_to_string(if_cond_type));
+            exit(1);
+        }
+        if (elif_cond_type != TYPE_BOOL) 
+        {
+            fprintf(stderr, "Semantic Error: condition in 'elif' must be of type 'bool', got '%s'.\n", type_to_string(elif_cond_type));
+            exit(1);
+        }
+        $$ = mknode("if-elif", $2, mknode("then", $4, mknode("elif-cond", $6, $8)));
+    }
+    | IF expression ':' block_statement ELIF expression ':' block_statement ELSE ':' block_statement 
+    {
+        VarType if_cond_type = infer_type($2);
+        VarType elif_cond_type = infer_type($6);
+        if (if_cond_type != TYPE_BOOL) 
+        {
+            fprintf(stderr, "Semantic Error: condition in 'if' must be of type 'bool', got '%s'.\n", type_to_string(if_cond_type));
+            exit(1);
+        }
+        if (elif_cond_type != TYPE_BOOL) 
+        {
+            fprintf(stderr, "Semantic Error: condition in 'elif' must be of type 'bool', got '%s'.\n", type_to_string(elif_cond_type));
+            exit(1);
+        }
+        $$ = mknode("if-elif-else", $2, mknode("then", $4, mknode("elif-cond", $6, mknode("elif-then", $8, mknode("else", $11, NULL)))));
+    }
+;
 
 while_statement:
-    WHILE expression ':' block_statement {$$ = mknode("while", $2, $4);}
+    WHILE expression ':' block_statement 
+    {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: condition in 'while' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("while", $2, $4);
+    }
     ;
 
 do_while_statement:
-    DO ':' block_statement WHILE expression ';' {$$ = mknode("do-while", $3, mknode("cond", $5, NULL));}
+    DO ':' block_statement WHILE expression ';' 
+    {
+        VarType cond_type = infer_type($5);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: condition in 'do-while' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("do-while", $3, mknode("cond", $5, NULL));
+    }
     ;
 
 for_statement:
@@ -358,8 +486,14 @@ for_statement:
 
 for_header:
     '(' IDENTIFIER ASSIGN expression ';' expression ';' update_exp ')' 
-    {$$ = mknode("for-header", mknode("init", mknode($2, NULL, NULL), $4), 
-                             mknode("loop", $6, $8));}
+    {
+        VarType cond_type = infer_type($6);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: condition in 'for' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("for-header", mknode("init", mknode($2, NULL, NULL), $4), mknode("loop", $6, $8));
+    }
     ;
 
 update_exp:
@@ -494,6 +628,8 @@ expression:
         char_str[1] = '\0';
         $$ = mknode(char_str, NULL, NULL);
     }
+    | TRUE { $$ = mknode("TRUE", NULL, NULL); }
+    | FALSE { $$ = mknode("FALSE", NULL, NULL); }
     | IDENTIFIER {
         if (!is_variable_defined($1)) {
             fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
@@ -514,11 +650,18 @@ expression:
         }
         $$ = mknode("&", mknode($2, NULL, NULL), NULL);
     }
-    | AMPERSAND IDENTIFIER '[' expression ']' {
+    | AMPERSAND IDENTIFIER '[' expression ']' 
+    {
         if (!is_variable_defined($2)) {
             fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
             exit(1);
         }
+        VarType index_type = infer_type($4);
+        if (index_type != TYPE_INT) {
+            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
+
         $$ = mknode("&", mknode("index", mknode($2, NULL, NULL), $4), NULL);
     }
     | MULT IDENTIFIER {
@@ -538,11 +681,19 @@ expression:
     | expression LT expression {$$ = mknode("<", $1, $3);}
     | expression AND expression {$$ = mknode("and", $1, $3);}
     | expression OR expression {$$ = mknode("or", $1, $3);}
-    | IDENTIFIER '[' expression ']' {
+    | IDENTIFIER '[' expression ']' 
+    {
         if (!is_variable_defined($1)) {
             fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
             exit(1);
         }
+
+        VarType index_type = infer_type($3);
+        if (index_type != TYPE_INT) {
+            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
+
         $$ = mknode("index", mknode($1, NULL, NULL), $3);
     }
     | function_call {$$ = $1;} /* Allow function calls in expressions */
@@ -777,17 +928,8 @@ void extract_param_types(node* param_node, VarType* types)
 VarType infer_type(node* expr) {
     if (!expr || !expr->token) return TYPE_INVALID;
 
-    // Integer literal
-    if (strspn(expr->token, "0123456789") == strlen(expr->token)) {
-        return TYPE_INT;
-    }
-
-    // Real literal
-    if (strchr(expr->token, '.') != NULL) {
-        return TYPE_REAL;
-    }
-
-    // Variable lookup
+    // ---------------------------------------
+    // 1. Variable lookup (placed early!)
     Symbol* sym = symbol_table;
     while (sym) {
         if (!sym->is_function && strcmp(sym->name, expr->token) == 0) {
@@ -796,7 +938,38 @@ VarType infer_type(node* expr) {
         sym = sym->next;
     }
 
-    // Pointer dereference
+    // ---------------------------------------
+    // 2. Boolean literals
+    if (strcmp(expr->token, "TRUE") == 0 || strcmp(expr->token, "FALSE") == 0) {
+        return TYPE_BOOL;
+    }
+
+    // ---------------------------------------
+    // 3. Integer literal (all digits)
+    if (strspn(expr->token, "0123456789") == strlen(expr->token)) {
+        return TYPE_INT;
+    }
+
+    // ---------------------------------------
+    // 4. Real literal (has a dot)
+    if (strchr(expr->token, '.') != NULL) {
+        return TYPE_REAL;
+    }
+
+    // ---------------------------------------
+    // 5. Character literal (single printable character)
+    if (strlen(expr->token) == 1 && isprint(expr->token[0])) {
+        return TYPE_CHAR;
+    }
+
+    // ---------------------------------------
+    // 6. String literal
+    if (strcmp(expr->token, "STRING_LITERAL") == 0 && expr->left && expr->left->token) {
+        return TYPE_STRING;
+    }
+
+    // ---------------------------------------
+    // 7. Pointer dereference
     if (strcmp(expr->token, "deref") == 0 && expr->left) {
         VarType inner = infer_type(expr->left);
         if (inner == TYPE_INT_PTR) return TYPE_INT;
@@ -804,7 +977,8 @@ VarType infer_type(node* expr) {
         if (inner == TYPE_REAL_PTR) return TYPE_REAL;
     }
 
-    // Address-of operator
+    // ---------------------------------------
+    // 8. Address-of operator
     if (strcmp(expr->token, "&") == 0 && expr->left) {
         VarType inner = infer_type(expr->left);
         if (inner == TYPE_INT) return TYPE_INT_PTR;
@@ -812,13 +986,44 @@ VarType infer_type(node* expr) {
         if (inner == TYPE_REAL) return TYPE_REAL_PTR;
     }
 
-    // String literal (e.g., "hello")
-    if (strcmp(expr->token, "STRING_LITERAL") == 0 && expr->left && expr->left->token) {
-        return TYPE_STRING;
-    }   
+    // ---------------------------------------
+    // 9. Comparison operators
+    if (strcmp(expr->token, "==") == 0 || strcmp(expr->token, "!=") == 0 ||
+        strcmp(expr->token, ">") == 0  || strcmp(expr->token, "<") == 0  ||
+        strcmp(expr->token, ">=") == 0 || strcmp(expr->token, "<=") == 0) {
+        return TYPE_BOOL;
+    }
+
+    // ---------------------------------------
+    // 10. Logical operators
+    if (strcmp(expr->token, "and") == 0 || strcmp(expr->token, "or") == 0 || strcmp(expr->token, "not") == 0) {
+        return TYPE_BOOL;
+    }
+
+    // ---------------------------------------
+    // 11. Arithmetic operators
+    if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0 ||
+        strcmp(expr->token, "*") == 0 || strcmp(expr->token, "/") == 0 ||
+        strcmp(expr->token, "%") == 0 || strcmp(expr->token, "unary-") == 0) {
+        return infer_type(expr->left);
+    }
+
+    // ---------------------------------------
+    // 12. Array indexing
+    if (strcmp(expr->token, "index") == 0 && expr->left) {
+        return infer_type(expr->left);
+    }
+
+    // ---------------------------------------
+    // 13. Function call
+    if (strcmp(expr->token, "call") == 0 && expr->left && expr->left->token) {
+        Symbol* sym = find_function_symbol(expr->left->token);
+        if (sym) return sym->return_type;
+    }
 
     return TYPE_INVALID;
 }
+
 
 
 const char* type_to_string(VarType type) {
