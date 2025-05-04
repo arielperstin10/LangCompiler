@@ -41,6 +41,7 @@ ID [A-Za-z][A-Za-z0-9_]*
 "call"            { return CALL; }
 "and"             { return AND; }
 "not"             { return NOT; }
+"!"               { return NOT; }
 "or"              { return OR; }
 "type"            { return TYPE; }
 "_main_"          { return MAIN; }
@@ -74,6 +75,7 @@ ID [A-Za-z][A-Za-z0-9_]*
 ";"               { return ';'; }
 ":"               { return ':'; }
 ","               { return ','; }
+\|                { return '|'; }
 
 0x{HEXDIGIT}+     { yylval.intVal = (int)strtol(yytext, NULL, 16); return INTEGER; }
 {DIGIT}+          { yylval.intVal = atoi(yytext); return INTEGER; }

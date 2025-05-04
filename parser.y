@@ -348,12 +348,56 @@ assignment_statement:
             fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
             exit(1);
         }
+
+        VarType lhs_type = TYPE_INVALID;
+        Symbol* sym = symbol_table;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
+                lhs_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        VarType rhs_type = infer_type($3);
+
+        // Allow assignment of NULL to pointer types only
+        if (rhs_type == TYPE_INVALID && strcmp($3->token, "null") == 0) {
+            if (lhs_type != TYPE_INT_PTR && lhs_type != TYPE_CHAR_PTR && lhs_type != TYPE_REAL_PTR) {
+                fprintf(stderr, "Semantic Error: 'null' can only be assigned to pointer types, got '%s'.\n", type_to_string(lhs_type));
+                exit(1);
+            }
+        } else if (lhs_type != rhs_type) {
+            fprintf(stderr, "Semantic Error: cannot assign '%s' to variable of type '%s'.\n", type_to_string(rhs_type), type_to_string(lhs_type));
+            exit(1);
+        }
+
         $$ = mknode("assign", mknode($1, NULL, NULL), $3);
     }
     | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {
+
+        if (!is_variable_defined($1)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
+        
         VarType index_type = infer_type($3);
         if (index_type != TYPE_INT) {
             fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
+        Symbol* sym = symbol_table;
+        VarType base_type = TYPE_INVALID;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
+                base_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        if (base_type != TYPE_STRING) {
+            fprintf(stderr, "Semantic Error: index operator '[]' is only allowed on strings, got '%s'.\n", type_to_string(base_type));
             exit(1);
         }
         char char_str[2];
@@ -368,14 +412,117 @@ assignment_statement:
             fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
             exit(1);
         }
+
+        // Check pointer type
+        Symbol* sym = symbol_table;
+        VarType ptr_type = TYPE_INVALID;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $2) == 0) {
+                ptr_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        VarType target_type = TYPE_INVALID;
+        switch (ptr_type) {
+            case TYPE_INT_PTR: target_type = TYPE_INT; break;
+            case TYPE_CHAR_PTR: target_type = TYPE_CHAR; break;
+            case TYPE_REAL_PTR: target_type = TYPE_REAL; break;
+            default:
+                fprintf(stderr, "Semantic Error: '*' applied to non-pointer variable '%s'.\n", $2);
+                exit(1);
+        }
+
+        VarType expr_type = infer_type($4);
+        if (expr_type != target_type) {
+            fprintf(stderr, "Semantic Error: cannot assign '%s' to dereferenced '%s'.\n",
+                    type_to_string(expr_type), type_to_string(ptr_type));
+            exit(1);
+        }
         $$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);
     }
-    | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' {$$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));}
-    | IDENTIFIER ASSIGN NULL_TOKEN ';' {$$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));}
+    | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' 
+    {
+        if (!is_variable_defined($1) || !is_variable_defined($4)) {
+            fprintf(stderr, "Semantic Error: Undefined variable in reference assignment.\n");
+            exit(1);
+        }
+
+        // LHS should be pointer to RHS type
+        VarType lhs_type = TYPE_INVALID;
+        VarType rhs_type = TYPE_INVALID;
+        Symbol *sym = symbol_table;
+
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) lhs_type = sym->type;
+            if (!sym->is_function && strcmp(sym->name, $4) == 0) rhs_type = sym->type;
+            sym = sym->next;
+        }
+
+        VarType expected_ptr_type = TYPE_INVALID;
+        switch (rhs_type) {
+            case TYPE_INT: expected_ptr_type = TYPE_INT_PTR; break;
+            case TYPE_CHAR: expected_ptr_type = TYPE_CHAR_PTR; break;
+            case TYPE_REAL: expected_ptr_type = TYPE_REAL_PTR; break;
+            default:
+                fprintf(stderr, "Semantic Error: Cannot take address of variable of type '%s'.\n", type_to_string(rhs_type));
+                exit(1);
+        }
+
+        if (lhs_type != expected_ptr_type) {
+            fprintf(stderr, "Semantic Error: cannot assign address of '%s' to variable of type '%s'.\n",
+                    type_to_string(rhs_type), type_to_string(lhs_type));
+            exit(1);
+        }
+
+        $$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));
+    }
+    | IDENTIFIER ASSIGN NULL_TOKEN ';' 
+    {
+        if (!is_variable_defined($1)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
+
+        Symbol* sym = symbol_table;
+        VarType lhs_type = TYPE_INVALID;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
+                lhs_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        if (lhs_type != TYPE_INT_PTR && lhs_type != TYPE_CHAR_PTR && lhs_type != TYPE_REAL_PTR) {
+            fprintf(stderr, "Semantic Error: 'null' can only be assigned to pointer types, got '%s'.\n", type_to_string(lhs_type));
+            exit(1);
+        }
+        $$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));
+    }
     | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {
+        if (!is_variable_defined($1)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
         VarType index_type = infer_type($3);
         if (index_type != TYPE_INT) {
             fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
+            exit(1);
+        }
+        Symbol* sym = symbol_table;
+        VarType base_type = TYPE_INVALID;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
+                base_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        if (base_type != TYPE_STRING) {
+            fprintf(stderr, "Semantic Error: index operator '[]' is only allowed on strings, got '%s'.\n", type_to_string(base_type));
             exit(1);
         }
         char int_str[20];
@@ -391,11 +538,32 @@ assignment_statement:
         $$ = mknode("array_assign", mknode($1, $3, NULL), mknode($6, NULL, NULL));
     }
     | IDENTIFIER '[' expression ']' ASSIGN expression ';' {
+        if (!is_variable_defined($1)) {
+            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
+            exit(1);
+        }
+
         VarType index_type = infer_type($3);
         if (index_type != TYPE_INT) {
             fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
             exit(1);
         }
+
+        Symbol* sym = symbol_table;
+        VarType base_type = TYPE_INVALID;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
+                base_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        if (base_type != TYPE_STRING) {
+            fprintf(stderr, "Semantic Error: index operator '[]' is only allowed on strings, got '%s'.\n", type_to_string(base_type));
+            exit(1);
+        }
+
         $$ = mknode("array_assign", mknode($1, $3, NULL), $6);
     }
     ;
@@ -672,6 +840,15 @@ expression:
         $$ = mknode("deref", mknode($2, NULL, NULL), NULL);
     }
     | MULT expression {$$ = mknode("*", $2, NULL);}
+    | | NOT expression 
+    {
+        VarType t = infer_type($2);
+        if (t != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: '!' operator can only be used on bool, got '%s'.\n", type_to_string(t));
+            exit(1);
+        }
+            $$ = mknode("not", $2, NULL);
+    }
     | '(' expression ')' {$$ = $2;}
     | expression EQ expression {$$ = mknode("==", $1, $3);}
     | expression NE expression {$$ = mknode("!=", $1, $3);}
@@ -694,7 +871,30 @@ expression:
             exit(1);
         }
 
+        Symbol* sym = symbol_table;
+        VarType base_type = TYPE_INVALID;
+        while (sym) {
+            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
+                base_type = sym->type;
+                break;
+            }
+            sym = sym->next;
+        }
+
+        if (base_type != TYPE_STRING) {
+            fprintf(stderr, "Semantic Error: index operator '[]' is only allowed on strings, got '%s'.\n", type_to_string(base_type));
+            exit(1);
+        }
+
         $$ = mknode("index", mknode($1, NULL, NULL), $3);
+    }
+    | '|' expression '|' {
+        VarType inner_type = infer_type($2);
+        if (inner_type != TYPE_STRING) {
+            fprintf(stderr, "Semantic Error: absolute value operator '||' can only be used on strings, got '%s'.\n", type_to_string(inner_type));
+            exit(1);
+        }
+        $$ = mknode("strlen", $2, NULL);  // or name it "abs" if preferred
     }
     | function_call {$$ = $1;} /* Allow function calls in expressions */
     ;
@@ -928,8 +1128,151 @@ void extract_param_types(node* param_node, VarType* types)
 VarType infer_type(node* expr) {
     if (!expr || !expr->token) return TYPE_INVALID;
 
-    // ---------------------------------------
-    // 1. Variable lookup (placed early!)
+    // Boolean literals
+    if (strcmp(expr->token, "TRUE") == 0 || strcmp(expr->token, "FALSE") == 0) {
+        return TYPE_BOOL;
+    }
+
+    // Integer literal
+    if (strspn(expr->token, "0123456789") == strlen(expr->token)) {
+        return TYPE_INT;
+    }
+
+    // Real literal (e.g., "3.14")
+    if (strchr(expr->token, '.') != NULL) {
+        return TYPE_REAL;
+    }
+    /*
+    if (strlen(expr->token) == 1 && isprint(expr->token[0])) {
+        return TYPE_CHAR;
+    }
+    */
+    // String literal node
+    if (strcmp(expr->token, "STRING_LITERAL") == 0 && expr->left && expr->left->token) {
+        return TYPE_STRING;
+    }
+
+    // Unary minus
+    if (strcmp(expr->token, "unary-") == 0 && expr->left) {
+        VarType t = infer_type(expr->left);
+        if (t == TYPE_INT || t == TYPE_REAL) return t;
+        fprintf(stderr, "Semantic Error: unary '-' expects int or real, got '%s'.\n", type_to_string(t));
+        exit(1);
+    }
+
+    // Logical NOT
+    if (strcmp(expr->token, "not") == 0 && expr->left) {
+        VarType t = infer_type(expr->left);
+        if (t == TYPE_BOOL) return TYPE_BOOL;
+        fprintf(stderr, "Semantic Error: 'not' expects bool, got '%s'.\n", type_to_string(t));
+        exit(1);
+    }
+
+    // Absolute value
+    if (strcmp(expr->token, "|") == 0 && expr->left) {
+        VarType t = infer_type(expr->left);
+        if (t == TYPE_INT || t == TYPE_REAL || t == TYPE_STRING) return TYPE_INT;
+        fprintf(stderr, "Semantic Error: '|' operator expects int, real, or string, got '%s'.\n", type_to_string(t));
+        exit(1);
+    }
+
+    // Binary arithmetic operators
+    if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0 ||
+        strcmp(expr->token, "*") == 0 || strcmp(expr->token, "/") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+        if ((l == TYPE_INT || l == TYPE_REAL) && (r == TYPE_INT || r == TYPE_REAL)) {
+            return (l == TYPE_REAL || r == TYPE_REAL) ? TYPE_REAL : TYPE_INT;
+        }
+        fprintf(stderr, "Semantic Error: '%s' operands must be int or real, got '%s' and '%s'.\n",
+                expr->token, type_to_string(l), type_to_string(r));
+        exit(1);
+    }
+
+    if (strcmp(expr->token, "%") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+        if (l == TYPE_INT && r == TYPE_INT) return TYPE_INT;
+        fprintf(stderr, "Semantic Error: '%%' operands must be int, got '%s' and '%s'.\n", type_to_string(l), type_to_string(r));
+        exit(1);
+    }
+
+    // Comparison operators
+    if (strcmp(expr->token, ">") == 0 || strcmp(expr->token, "<") == 0 ||
+        strcmp(expr->token, ">=") == 0 || strcmp(expr->token, "<=") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+        if ((l == TYPE_INT || l == TYPE_REAL) && (r == TYPE_INT || r == TYPE_REAL)) {
+            return TYPE_BOOL;
+        }
+        fprintf(stderr, "Semantic Error: Comparison requires int or real operands, got '%s' and '%s'.\n",
+                type_to_string(l), type_to_string(r));
+        exit(1);
+    }
+
+    // Equality
+    if (strcmp(expr->token, "==") == 0 || strcmp(expr->token, "!=") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+        if (l == r) return TYPE_BOOL;
+        fprintf(stderr, "Semantic Error: Equality operands must match, got '%s' and '%s'.\n",
+                type_to_string(l), type_to_string(r));
+        exit(1);
+    }
+
+    // Absolute value or string length operator (|expr| becomes strlen node)
+    if (strcmp(expr->token, "strlen") == 0) {
+        VarType inner = infer_type(expr->left);
+        if (inner == TYPE_STRING)
+            return TYPE_INT;
+        return TYPE_INVALID;
+    }
+
+    // Logical operators
+    if (strcmp(expr->token, "and") == 0 || strcmp(expr->token, "or") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+        if (l == TYPE_BOOL && r == TYPE_BOOL) return TYPE_BOOL;
+        fprintf(stderr, "Semantic Error: Logical '%s' expects bool operands, got '%s' and '%s'.\n",
+                expr->token, type_to_string(l), type_to_string(r));
+        exit(1);
+    }
+
+    // Pointer dereference
+    if (strcmp(expr->token, "deref") == 0 && expr->left) {
+        VarType inner = infer_type(expr->left);
+        switch (inner) {
+            case TYPE_INT_PTR: return TYPE_INT;
+            case TYPE_CHAR_PTR: return TYPE_CHAR;
+            case TYPE_REAL_PTR: return TYPE_REAL;
+            default:
+                fprintf(stderr, "Semantic Error: unary '*' can only be applied to pointer types, got '%s'.\n", type_to_string(inner));
+                exit(1);
+        }
+    }
+
+    // Address-of
+    if (strcmp(expr->token, "&") == 0 && expr->left) {
+        VarType inner = infer_type(expr->left);
+        if (inner == TYPE_INT) return TYPE_INT_PTR;
+        if (inner == TYPE_CHAR) return TYPE_CHAR_PTR;
+        if (inner == TYPE_REAL) return TYPE_REAL_PTR;
+        fprintf(stderr, "Semantic Error: '&' expects int, char or real type, got '%s'.\n", type_to_string(inner));
+        exit(1);
+    }
+
+    // Indexing
+    if (strcmp(expr->token, "index") == 0 && expr->left) {
+        return infer_type(expr->left);
+    }
+
+    // Function call
+    if (strcmp(expr->token, "call") == 0 && expr->left && expr->left->token) {
+        Symbol* sym = find_function_symbol(expr->left->token);
+        if (sym) return sym->return_type;
+    }
+
+    // Variable lookup
     Symbol* sym = symbol_table;
     while (sym) {
         if (!sym->is_function && strcmp(sym->name, expr->token) == 0) {
@@ -938,91 +1281,50 @@ VarType infer_type(node* expr) {
         sym = sym->next;
     }
 
-    // ---------------------------------------
-    // 2. Boolean literals
-    if (strcmp(expr->token, "TRUE") == 0 || strcmp(expr->token, "FALSE") == 0) {
-        return TYPE_BOOL;
-    }
-
-    // ---------------------------------------
-    // 3. Integer literal (all digits)
-    if (strspn(expr->token, "0123456789") == strlen(expr->token)) {
-        return TYPE_INT;
-    }
-
-    // ---------------------------------------
-    // 4. Real literal (has a dot)
-    if (strchr(expr->token, '.') != NULL) {
-        return TYPE_REAL;
-    }
-
-    // ---------------------------------------
-    // 5. Character literal (single printable character)
-    if (strlen(expr->token) == 1 && isprint(expr->token[0])) {
-        return TYPE_CHAR;
-    }
-
-    // ---------------------------------------
-    // 6. String literal
-    if (strcmp(expr->token, "STRING_LITERAL") == 0 && expr->left && expr->left->token) {
-        return TYPE_STRING;
-    }
-
-    // ---------------------------------------
-    // 7. Pointer dereference
-    if (strcmp(expr->token, "deref") == 0 && expr->left) {
-        VarType inner = infer_type(expr->left);
-        if (inner == TYPE_INT_PTR) return TYPE_INT;
-        if (inner == TYPE_CHAR_PTR) return TYPE_CHAR;
-        if (inner == TYPE_REAL_PTR) return TYPE_REAL;
-    }
-
-    // ---------------------------------------
-    // 8. Address-of operator
     if (strcmp(expr->token, "&") == 0 && expr->left) {
-        VarType inner = infer_type(expr->left);
-        if (inner == TYPE_INT) return TYPE_INT_PTR;
-        if (inner == TYPE_CHAR) return TYPE_CHAR_PTR;
-        if (inner == TYPE_REAL) return TYPE_REAL_PTR;
-    }
+        VarType inner_type = TYPE_INVALID;
 
-    // ---------------------------------------
-    // 9. Comparison operators
-    if (strcmp(expr->token, "==") == 0 || strcmp(expr->token, "!=") == 0 ||
-        strcmp(expr->token, ">") == 0  || strcmp(expr->token, "<") == 0  ||
-        strcmp(expr->token, ">=") == 0 || strcmp(expr->token, "<=") == 0) {
-        return TYPE_BOOL;
-    }
+        if (strcmp(expr->left->token, "index") == 0) {
+            // Check if this is &something[index]
+            node* base = expr->left->left;
+            Symbol* sym = symbol_table;
+            while (sym) {
+                if (!sym->is_function && strcmp(sym->name, base->token) == 0) {
+                    inner_type = sym->type;
+                    break;
+                }
+                sym = sym->next;
+            }
 
-    // ---------------------------------------
-    // 10. Logical operators
-    if (strcmp(expr->token, "and") == 0 || strcmp(expr->token, "or") == 0 || strcmp(expr->token, "not") == 0) {
-        return TYPE_BOOL;
-    }
+            if (inner_type != TYPE_STRING) {
+                fprintf(stderr, "Semantic Error: '&' can only be applied to indexed strings, got '%s'.\n", type_to_string(inner_type));
+                exit(1);
+            }
 
-    // ---------------------------------------
-    // 11. Arithmetic operators
-    if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0 ||
-        strcmp(expr->token, "*") == 0 || strcmp(expr->token, "/") == 0 ||
-        strcmp(expr->token, "%") == 0 || strcmp(expr->token, "unary-") == 0) {
-        return infer_type(expr->left);
-    }
+            return TYPE_CHAR_PTR;
+        } else {
+            // Check for &x
+            Symbol* sym = symbol_table;
+            while (sym) {
+                if (!sym->is_function && strcmp(sym->name, expr->left->token) == 0) {
+                    inner_type = sym->type;
+                    break;
+                }
+                sym = sym->next;
+            }
 
-    // ---------------------------------------
-    // 12. Array indexing
-    if (strcmp(expr->token, "index") == 0 && expr->left) {
-        return infer_type(expr->left);
-    }
+            if (inner_type == TYPE_INT) return TYPE_INT_PTR;
+            if (inner_type == TYPE_CHAR) return TYPE_CHAR_PTR;
+            if (inner_type == TYPE_REAL) return TYPE_REAL_PTR;
 
-    // ---------------------------------------
-    // 13. Function call
-    if (strcmp(expr->token, "call") == 0 && expr->left && expr->left->token) {
-        Symbol* sym = find_function_symbol(expr->left->token);
-        if (sym) return sym->return_type;
+            fprintf(stderr, "Semantic Error: '&' operator can only be applied to variables of type int, char, or real, got '%s'.\n", type_to_string(inner_type));
+            exit(1);
+        }
     }
 
     return TYPE_INVALID;
 }
+
 
 
 

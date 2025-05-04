@@ -1,7 +1,6 @@
 def _main_():
 var
-    type char:arr[5];
-    type bool:i:TRUE;
+    type char*:cp;
 begin
-    arr[i] = 'A';
+    cp = null;
 end
