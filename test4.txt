@@ -1,0 +1,8 @@
+def foo(par1 int:a; par2 real:b; par3 char:c):
+begin
+end
+
+def _main_():
+begin
+    call foo(10, "hello", 'x');
+end
