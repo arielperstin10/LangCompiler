@@ -2,10 +2,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "y.tab.h"  /* Include the parser's token definitions */
+
+#define MAX_PARAMS 10
+
+typedef enum {
+    TYPE_INT, TYPE_CHAR, TYPE_REAL, TYPE_STRING, TYPE_BOOL,
+    TYPE_INT_PTR, TYPE_CHAR_PTR, TYPE_REAL_PTR, TYPE_INVALID
+} VarType;
+
+#include "parser.tab.h"
 
 extern YYSTYPE yylval;
-/* Define yywrap to avoid linking with -ll */
 int yywrap(void) { return 1; }
 %}
 
@@ -30,7 +37,6 @@ ID [A-Za-z][A-Za-z0-9_]*
 "while"           { return WHILE; }
 "for"             { return FOR; }
 "var"             { return VAR; }
-"par"[0-9]+       { return PAR; }
 "return"          { return RETURN; }
 "null"            { return NULL_TOKEN; }  /* Changed from NULL to NULL_TOKEN to avoid conflict */
 "do"              { return DO; }

@@ -16,6 +16,7 @@
         TYPE_INT_PTR, TYPE_CHAR_PTR, TYPE_REAL_PTR, TYPE_INVALID
     } VarType;
 
+    extern int yydebug;
     typedef struct Symbol {
         char* name;
         VarType type;
@@ -53,7 +54,11 @@
     Symbol* symbol_table = NULL;
     int current_scope_level = 0;
     int main_count = 0;
+    int last_param_number = 0;
 %}
+
+%debug
+%start code
 
 %union {
     int intVal;
@@ -74,7 +79,7 @@
 %token <stringVal> STRING_LITERAL IDENTIFIER
 
 %token BOOL CHAR INT REAL_TYPE STRING INT_PTR CHAR_PTR REAL_PTR TYPE MODULO
-%token IF ELIF ELSE WHILE FOR VAR PAR RETURN NULL_TOKEN DO RETURNS BEGIN_TOKEN END DEF CALL AND NOT OR
+%token IF ELIF ELSE WHILE FOR VAR RETURN NULL_TOKEN DO RETURNS BEGIN_TOKEN END DEF CALL AND NOT OR
 %token EQ NE GE LE GT LT ASSIGN PLUS MINUS MULT DIV AMPERSAND TRUE FALSE
 %token MAIN
 
@@ -115,8 +120,8 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
             insert_symbol("_main_", TYPE_INVALID, 1, TYPE_INVALID, NULL, 0); 
             $$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));
         }
-        | DEF IDENTIFIER '(' parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {
-            node* last_stmt = $11;
+        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {
+            node* last_stmt = $12;
             while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->right) {
                 last_stmt = last_stmt->right;
             }
@@ -132,10 +137,10 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
                 YYERROR;
             }
 
-            VarType declared_type = string_to_type($8->token);
+            VarType declared_type = string_to_type($9->token);
             VarType param_types[MAX_PARAMS];
-            int param_count = count_params($4);
-            extract_param_types($4, param_types);
+            int param_count = count_params($5);
+            extract_param_types($5, param_types);
             insert_symbol($2, TYPE_INVALID, 1, declared_type, param_types, param_count);
 
             if (declared_type == TYPE_STRING) {
@@ -156,11 +161,11 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
             }
 
             
-            $$ = mknode("FUNC", mknode($2, $4, mknode("ret", $8, $9)), mknode("body", $11, NULL));
+            $$ = mknode("FUNC", mknode($2, $5, mknode("ret", $9, $10)), mknode("body", $12, NULL));
         } 
-        | DEF IDENTIFIER '(' parameters ')' ':' var BEGIN_TOKEN statements END {
+        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' var BEGIN_TOKEN statements END {
             // Check if last statement is a return
-            node* last_stmt = $9;
+            node* last_stmt = $10;
             while (last_stmt && last_stmt->right) {
                 last_stmt = last_stmt->right;
             }
@@ -168,28 +173,45 @@ function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
                 yyerror("Error: function without RETURNS must not have a return statement");
                 YYERROR;
             }
-            if (strcmp($2, "_main_") == 0 && $4 != NULL) 
+            if (strcmp($2, "_main_") == 0 && $5 != NULL) 
             {
                 yyerror("Semantic Error: _main_ must not have parameters.");
                 YYERROR;
             }
-            int param_count = count_params($4);
+            int param_count = count_params($5);
             VarType param_types[MAX_PARAMS];
-            extract_param_types($4, param_types);
+            extract_param_types($5, param_types);
             insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, param_types, param_count);
-            $$ = mknode("FUNC", mknode($2, $4, NULL), mknode("body", $9, NULL));
+            $$ = mknode("FUNC", mknode($2, $5, NULL), mknode("body", $10, NULL));
         }
         ;
+
+reset_param_counter: /* empty */ {last_param_number = 0;};
 
 parameters: /* empty */ {$$ = NULL;}
         | parameter_list {$$ = $1;}
         ;
 
-parameter_list: parameter {$$ = $1;}
-        | parameter ';' parameter_list {$$ = mknode("PARAMS", $1, $3);}
+parameter_list: parameter ';' parameter_list {$$ = mknode("PARAMS", $1, $3);}
+        | parameter {$$ = $1;}
         ;
 
-parameter: PAR type ':' IDENTIFIER {$$ = mknode($4, $2, NULL);};
+parameter: IDENTIFIER type ':' IDENTIFIER {
+    if (strncmp($1, "par", 3) != 0) {
+        yyerror("Error: parameter names must start with 'par'.");
+        YYERROR;
+    }
+
+    int current_num = atoi(&$1[3]);
+    if (current_num != last_param_number + 1) {
+        yyerror("parameter numbers must be in strictly increasing order (par1, par2, ...).");
+        YYERROR;
+    }
+
+    last_param_number = current_num;
+
+    $$ = mknode("parameter", mknode($1, NULL, NULL), mknode($2->token, NULL, NULL));
+};
 
 var: /* empty */ {$$ = NULL;}
     | VAR declaration_list {$$ = mknode("VAR", $2, NULL);}
@@ -903,6 +925,7 @@ expression:
 
 int main()
 {
+    //yydebug = 1;
     if (yyparse() == 0) {
         if (main_count == 0) 
         {
@@ -973,30 +996,48 @@ int yyerror(const char* s)
 void visualize_ast(node* root, const char* branch_prefix, int is_left_branch) {
     if (!root) return;
 
-    // Print current node with appropriate branch connector
+    // Flatten PARAMS node for pretty printing
+    if (strcmp(root->token, "PARAMS") == 0) {
+        printf("%s", branch_prefix);
+        printf(is_left_branch ? "├── " : "└── ");
+        printf("PARAMS\n");
+
+        char child_prefix[1024];
+        snprintf(child_prefix, sizeof(child_prefix), "%s%s", 
+                 branch_prefix, is_left_branch ? "│   " : "    ");
+
+        node* current = root;
+        while (current) {
+            if (current->token && strcmp(current->token, "PARAMS") == 0 && current->left) {
+                visualize_ast(current->left, child_prefix, 1);
+                current = current->right;
+            } else {
+                visualize_ast(current, child_prefix, 0);
+                break;
+            }
+        }
+        return;
+    }
+
+    // Regular node printing
     printf("%s", branch_prefix);
     printf(is_left_branch ? "├── " : "└── ");
     printf("%s\n", root->token);
 
-    // Create new prefix for child nodes
     char child_prefix[1024];
     snprintf(child_prefix, sizeof(child_prefix), "%s%s", 
-             branch_prefix, 
-             is_left_branch ? "│   " : "    ");
+             branch_prefix, is_left_branch ? "│   " : "    ");
 
-    // Handle different child node cases
     if (root->left && root->right) {
-        // Both children exist - left child is not last
         visualize_ast(root->left, child_prefix, 1);
         visualize_ast(root->right, child_prefix, 0);
     } else if (root->left) {
-        // Only left child exists
         visualize_ast(root->left, child_prefix, 0);
     } else if (root->right) {
-        // Only right child exists
         visualize_ast(root->right, child_prefix, 0);
     }
 }
+
 
 // Part 2
 VarType string_to_type(const char* str) 
