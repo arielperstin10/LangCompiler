@@ -1,8 +1,20 @@
-def foo(par1 int:a; par2 real:b; par3 char:c):
-begin
-end
+def foo(par1 int:x; par2 int:y): returns int
+    var
+        type int:a,a2,a3,a4;
+    begin
+        if TRUE:
+                    a = (a + a) * 1;
+        a = 1+2*3;
+        for (a2=0 ; a2<10 and a!=5 ; a2 = a2 + 2):
+            begin
+                a = a +1;
+            end
+        while a < 10:
+            a = a + 1;
+        return a;
+    end
+
 
 def _main_():
 begin
-    call foo(10, "hello", 'x');
 end
