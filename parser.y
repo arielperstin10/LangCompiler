@@ -50,6 +50,10 @@
     VarType infer_type(node* expr);
     const char* type_to_string(VarType type);
     Symbol* find_function_symbol(const char* name);
+    void print_symbol_table();
+    void insert_parameters(node* param_iter);
+    static inline void push_func_scope(void);
+    static inline void pop_func_scope(void);
 
     node* root = NULL;
     Symbol* symbol_table = NULL;
@@ -58,6 +62,8 @@
     int last_param_number = 0;
     int function_scope_counter = 1;
     int current_function_scope_id = 0;
+    int func_scope_stack[128];
+    int func_scope_top = -1;
 %}
 
 %debug
@@ -110,131 +116,114 @@ functions: function {$$ = $1;}
         | function functions {$$ = mknode("functions", $1, $2);}
         ;
 
-function: DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END {
+function: 
+        DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END
+        {
             current_function_scope_id = function_scope_counter++;
             node* stmt = $8;
-            while (stmt) 
+            while (stmt)
             {
-                if (strcmp(stmt->token, "return_val") == 0) 
+                if (strcmp(stmt->token, "return_val") == 0)
                 {
                     yyerror("Semantic Error: _main_ must not contain return statements.");
                     YYERROR;
                 }
                 stmt = stmt->right;
             }
-            insert_symbol("_main_", TYPE_INVALID, 1, TYPE_INVALID, NULL, 0); 
-            enter_scope();
-            $$ = mknode("FUNC", mknode("main", NULL, $6), mknode("body", $8, NULL));
-            exit_scope();
+            insert_symbol("_main_", TYPE_INVALID, 1, TYPE_INVALID, NULL, 0);
+            enter_scope();    
+
+            $$ = mknode("FUNC",
+                        mknode("main", NULL, $6),
+                        mknode("body", $8, NULL));
+            exit_scope();    
         }
-        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' RETURNS type var BEGIN_TOKEN statements END {
+        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' RETURNS type
+        {   
             current_function_scope_id = function_scope_counter++;
-            node* last_stmt = $12;
-            VarType declared_type = string_to_type($9->token);
+            VarType declared_type  = string_to_type($9->token);
             VarType param_types[MAX_PARAMS];
-            int param_count = count_params($5);
+            int     param_count    = count_params($5);
             extract_param_types($5, param_types);
             insert_symbol($2, TYPE_INVALID, 1, declared_type, param_types, param_count);
             enter_scope();
-            node* param_iter = $5;
-            while (param_iter) {
-                if (strcmp(param_iter->token, "PARAMS") == 0) {
-                    node* left = param_iter->left;
-                    if (left && left->left && left->right) {
-                        VarType param_type = string_to_type(left->left->token);
-                        char* param_name = left->right->token;
-                        insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                    }
-                    param_iter = param_iter->right;
-                } else {
-                    if (param_iter->left && param_iter->right) {
-                        VarType param_type = string_to_type(param_iter->left->token);
-                        char* param_name = param_iter->right->token;
-                        insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                    }
-                    break;
-                }
-            }
-
-            while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->right) {
+            insert_parameters($5);
+        }
+        var BEGIN_TOKEN statements END
+        {   
+            VarType declared_type = string_to_type($9->token);
+            node* last_stmt = $13;
+            while (last_stmt && strcmp(last_stmt->token,"statements")==0 && last_stmt->right)
                 last_stmt = last_stmt->right;
-            }
-            node* final = (last_stmt && strcmp(last_stmt->token, "statements") == 0) ? last_stmt->left : last_stmt;
-
-            if (!final || (strcmp(final->token, "return_val") != 0 && strcmp(final->token, "return_void") != 0)) {
+            node* final = (last_stmt && strcmp(last_stmt->token,"statements")==0) ? last_stmt->left : last_stmt;
+            if (!final || (strcmp(final->token,"return_val")!=0 &&
+                        strcmp(final->token,"return_void")!=0))
+            {
                 yyerror("Error: function with RETURNS must end with a return statement");
                 YYERROR;
             }
-
-            if (strcmp($2, "_main_") == 0) {
+            if (strcmp($2,"_main_")==0)
+            {
                 yyerror("Semantic Error: _main_ must not return a value.");
                 YYERROR;
             }
-
-
-            if (declared_type == TYPE_STRING) {
-                fprintf(stderr, "Semantic Error: functions cannot return type 'string'.\n");
+            if (declared_type == TYPE_STRING)
+            {
+                fprintf(stderr,
+                "Semantic Error: functions cannot return type 'string'.\n");
                 exit(1);
             }
-
-            if (strcmp(final->token, "return_void") == 0) {
-                fprintf(stderr, "Semantic Error: function declared to return '%s' but returned nothing.\n", type_to_string(declared_type));
+            if (strcmp(final->token,"return_void")==0)
+            {
+                fprintf(stderr,
+                "Semantic Error: function declared to return '%s' but returned nothing.\n",
+                type_to_string(declared_type));
                 exit(1);
             }
-
             VarType actual_type = infer_type(final->left);
-            if (actual_type != declared_type) {
-                fprintf(stderr, "Semantic Error: return type mismatch — expected '%s', got '%s'.\n",
-                        type_to_string(declared_type), type_to_string(actual_type));
+            if (actual_type != declared_type)
+            {
+                fprintf(stderr,
+                "Semantic Error: return type mismatch — expected '%s', got '%s'.\n",
+                type_to_string(declared_type), type_to_string(actual_type));
                 exit(1);
             }
 
-            
-            $$ = mknode("FUNC", mknode($2, $5, mknode("ret", $9, $10)), mknode("body", $12, NULL));
-            exit_scope();
-        } 
-        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' var BEGIN_TOKEN statements END {
+            $$ = mknode("FUNC",
+                        mknode($2, $5, mknode("ret", $9, $11)),
+                        mknode("body", $13, NULL));
+            exit_scope();     
+        }
+        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':'
+        {  
             current_function_scope_id = function_scope_counter++;
-            int param_count = count_params($5);
             VarType param_types[MAX_PARAMS];
+            int     param_count = count_params($5);
             extract_param_types($5, param_types);
             insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, param_types, param_count);
             enter_scope();
-            node* param_iter = $5;
-            while (param_iter) {
-                if (strcmp(param_iter->token, "PARAMS") == 0) {
-                    node* left = param_iter->left;
-                    if (left && left->left && left->right) {
-                        VarType param_type = string_to_type(left->left->token);
-                        char* param_name = left->right->token;
-                        insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                    }
-                    param_iter = param_iter->right;
-                } else {
-                    if (param_iter->left && param_iter->right) {
-                        VarType param_type = string_to_type(param_iter->left->token);
-                        char* param_name = param_iter->right->token;
-                        insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                    }
-                    break;
-                }
-            }
-            // Check if last statement is a return
-            node* last_stmt = $10;
-            while (last_stmt && last_stmt->right) {
+            insert_parameters($5);
+        }
+        var BEGIN_TOKEN statements END
+        {   
+            node* last_stmt = $11;
+            while (last_stmt && last_stmt->right)
                 last_stmt = last_stmt->right;
-            }
-            if (last_stmt && strcmp(last_stmt->token, "return_val") == 0) {
+
+            if (last_stmt && strcmp(last_stmt->token,"return_val")==0)
+            {
                 yyerror("Error: function without RETURNS must not have a return statement");
                 YYERROR;
             }
-            if (strcmp($2, "_main_") == 0 && $5 != NULL) 
+            if (strcmp($2,"_main_")==0 && $5!=NULL)
             {
                 yyerror("Semantic Error: _main_ must not have parameters.");
                 YYERROR;
             }
-            
-            $$ = mknode("FUNC", mknode($2, $5, NULL), mknode("body", $10, NULL));
+
+            $$ = mknode("FUNC",
+                        mknode($2, $5, NULL),
+                        mknode("body", $11, NULL));
             exit_scope();
         }
         ;
@@ -254,6 +243,8 @@ parameter: IDENTIFIER type ':' IDENTIFIER {
         yyerror("Error: parameter names must start with 'par'.");
         YYERROR;
     }
+    fprintf(stderr, "[DEBUG] Matched parameter: %s of type %s with name %s\n", 
+            $1, $2->token, $4);
 
     int current_num = atoi(&$1[3]);
     if (current_num != last_param_number + 1) {
@@ -263,7 +254,7 @@ parameter: IDENTIFIER type ':' IDENTIFIER {
 
     last_param_number = current_num;
 
-    $$ = mknode("parameter", mknode($2->token, NULL, NULL), mknode($1, NULL, NULL));
+    $$ = mknode("parameter", mknode($2->token, NULL, NULL), mknode($4, NULL, NULL));
 };
 
 var: /* empty */ {$$ = NULL;}
@@ -331,115 +322,43 @@ statements:  /* empty */ { $$ = NULL; }
     ;
 
 
-nested_function: 
-    DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' RETURNS type var BEGIN_TOKEN 
-    {
-        current_function_scope_id = function_scope_counter++;
-        VarType ret_type = string_to_type($9->token);
-        int param_count = count_params($5);
-        VarType param_types[MAX_PARAMS];
-        extract_param_types($5, param_types);
-        insert_symbol($2, TYPE_INVALID, 1, ret_type, param_types, param_count);
-        enter_scope();
-        node* param_iter = $5;
-        while (param_iter) {
-            if (strcmp(param_iter->token, "PARAMS") == 0) {
-                node* left = param_iter->left;
-                if (left && left->left && left->right) {
-                    VarType param_type = string_to_type(left->left->token);
-                    char* param_name = left->right->token;
-                    insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                }
-                param_iter = param_iter->right;
-            } else {
-                if (param_iter->left && param_iter->right) {
-                    VarType param_type = string_to_type(param_iter->left->token);
-                    char* param_name = param_iter->right->token;
-                    insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                }
-                break;
-            }
+nested_function : 
+        DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' RETURNS type
+        {
+            push_func_scope();                 
+            current_function_scope_id = function_scope_counter++;
+            VarType ret_type = string_to_type($9->token);
+            VarType param_types[MAX_PARAMS];
+            int param_count  = count_params($5);
+            extract_param_types($5, param_types);
+            insert_symbol($2, TYPE_INVALID, 1, ret_type, param_types, param_count);
+            enter_scope();
+            insert_parameters($5);
         }
-
-    }
-    statements END
-    {
-        node* last_stmt = $13;
-        while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->right) {
-            last_stmt = last_stmt->right;
+        var BEGIN_TOKEN statements END
+        {
+            $$ = mknode("nested_func", mknode($2, $5, mknode("ret", $9, $11)), mknode("body", $13, NULL));
+            exit_scope();
+            pop_func_scope();                    
         }
-        node* final = (last_stmt && strcmp(last_stmt->token, "statements") == 0) ? last_stmt->left : last_stmt;
-
-        if (!final || (strcmp(final->token, "return_val") != 0 && strcmp(final->token, "return_void") != 0)) {
-            yyerror("Error: function with RETURNS must end with a return statement");
-            YYERROR;
+        | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':'
+        {
+            push_func_scope();                  
+            current_function_scope_id = function_scope_counter++;
+            VarType param_types[MAX_PARAMS];
+            int param_count = count_params($5);
+            extract_param_types($5, param_types);
+            insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, param_types, param_count);
+            enter_scope();
+            insert_parameters($5);
         }
-
-        VarType declared_type = string_to_type($9->token);
-
-        if (declared_type == TYPE_STRING) {
-            fprintf(stderr, "Semantic Error: functions cannot return type 'string'.\n");
-            exit(1);
+        var BEGIN_TOKEN statements END
+        {
+            $$ = mknode("nested_func", mknode($2, $5, NULL), mknode("body", $11, NULL));
+            exit_scope();
+            pop_func_scope();                   
         }
-
-        if (strcmp(final->token, "return_void") == 0) {
-            fprintf(stderr, "Semantic Error: function declared to return '%s' but returned nothing.\n", type_to_string(declared_type));
-            exit(1);
-        }
-
-        VarType actual_type = infer_type(final->left);
-        if (actual_type != declared_type) {
-            fprintf(stderr, "Semantic Error: return type mismatch — expected '%s', got '%s'.\n",
-                    type_to_string(declared_type), type_to_string(actual_type));
-            exit(1);
-        }
-        $$ = mknode("nested_func", mknode($2, $5, mknode("ret", $9, $10)), mknode("body", $13, NULL));
-        exit_scope();
-    }
-    | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' var BEGIN_TOKEN 
-    {
-        current_function_scope_id = function_scope_counter++;
-        int param_count = count_params($5);
-        VarType param_types[MAX_PARAMS];
-        extract_param_types($5, param_types);
-        insert_symbol($2, TYPE_INVALID, 1, TYPE_INVALID, param_types, param_count);
-        enter_scope();
-        node* param_iter = $5;
-        while (param_iter) {
-            if (strcmp(param_iter->token, "PARAMS") == 0) {
-                node* left = param_iter->left;
-                if (left && left->left && left->right) {
-                    VarType param_type = string_to_type(left->left->token);
-                    char* param_name = left->right->token;
-                    insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                }
-                param_iter = param_iter->right;
-            } else {
-                if (param_iter->left && param_iter->right) {
-                    VarType param_type = string_to_type(param_iter->left->token);
-                    char* param_name = param_iter->right->token;
-                    insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
-                }
-                break;
-            }
-        }
-
-    }
-    statements END
-    {
-        // Check if last statement is a return
-        node* last_stmt = $11;
-        while (last_stmt && last_stmt->right) {
-            last_stmt = last_stmt->right;
-        }
-        if (last_stmt && strcmp(last_stmt->token, "return_val") == 0) {
-            yyerror("Error: function without RETURNS must not have a return statement");
-            YYERROR;
-        }
-        $$ = mknode("nested_func", mknode($2, $5, NULL), mknode("body", $11, NULL));
-        exit_scope();
-    }
-    ;
+        ;
 
 statement: assignment_statement {$$ = $1;}
     | if_statement {$$ = $1;}
@@ -479,8 +398,14 @@ assignment_statement:
                 exit(1);
             }
         } else if (lhs_type != rhs_type) {
-            fprintf(stderr, "Semantic Error: cannot assign '%s' to variable of type '%s'.\n", type_to_string(rhs_type), type_to_string(lhs_type));
-            exit(1);
+            if (lhs_type == TYPE_REAL && rhs_type == TYPE_INT) {
+                // allowed promotion
+                fprintf(stderr, "[INFO] Implicitly promoting 'int' to 'real' for assignment.\n");
+            } else {
+                fprintf(stderr, "Semantic Error: cannot assign '%s' to variable of type '%s'.\n",
+                        type_to_string(rhs_type), type_to_string(lhs_type));
+                exit(1);
+            }
         }
 
         $$ = mknode("assign", mknode($1, NULL, NULL), $3);
@@ -907,10 +832,9 @@ expression:
     }
     | STRING_LITERAL {$$ = mknode("STRING_LITERAL", mknode($1, NULL, NULL), NULL);}
     | CHAR_LITERAL {
-        char char_str[2];
-        char_str[0] = $1;
-        char_str[1] = '\0';
-        $$ = mknode(char_str, NULL, NULL);
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%c", $1);
+        $$ = mknode("CHAR_LITERAL", mknode(buf, NULL, NULL), NULL);
     }
     | TRUE { $$ = mknode("TRUE", NULL, NULL); }
     | FALSE { $$ = mknode("FALSE", NULL, NULL); }
@@ -1174,6 +1098,10 @@ void insert_symbol(char* name, VarType type, int is_function, VarType return_typ
     new_sym->next = symbol_table;
     symbol_table = new_sym;
 
+    fprintf(stderr, "[INSERT] Added symbol '%s' | Type: %s | Scope: %d | FuncScopeID: %d | is_function: %d\n",
+            name, type_to_string(type), current_scope_level, current_function_scope_id, is_function);
+
+
     // Handle main function count
     if (is_function && strcmp(name, "_main_") == 0) {
         main_count++;
@@ -1222,6 +1150,12 @@ int is_variable_defined(const char* name) {
         }
         sym = sym->next;
     }
+
+    // Debug output when variable not found
+    fprintf(stderr, "[DEBUG] Variable '%s' not found.\n", name);
+    fprintf(stderr, "[DEBUG] Current Scope: %d | Function Scope ID: %d\n", current_scope_level, current_function_scope_id);
+    print_symbol_table();  // 🔍 dump the whole table
+
     return 0;
 }
 
@@ -1282,6 +1216,10 @@ VarType infer_type(node* expr) {
         return TYPE_CHAR;
     }
     */
+    if (strcmp(expr->token, "CHAR_LITERAL") == 0 && expr->left && expr->left->token) {
+        return TYPE_CHAR;
+    }
+
     // String literal node
     if (strcmp(expr->token, "STRING_LITERAL") == 0 && expr->left && expr->left->token) {
         return TYPE_STRING;
@@ -1486,4 +1424,50 @@ Symbol* find_function_symbol(const char* name) {
         sym = sym->next;
     }
     return NULL;
+}
+
+
+void print_symbol_table() {
+    printf("\n---- Symbol Table ----\n");
+    Symbol* sym = symbol_table;
+    while (sym) {
+        printf("Name: %-10s | Type: %-8s | Func: %d | RetType: %-8s | Params: %d | Scope: %d | FuncScopeID: %d\n",
+            sym->name,
+            type_to_string(sym->type),
+            sym->is_function,
+            type_to_string(sym->return_type),
+            sym->param_count,
+            sym->scope_level,
+            sym->function_scope_id);
+        sym = sym->next;
+    }
+    printf("----------------------\n");
+}
+
+void insert_parameters(node* param_iter) {
+    if (!param_iter) return;
+
+    if (strcmp(param_iter->token, "PARAMS") == 0) {
+        insert_parameters(param_iter->left);
+        insert_parameters(param_iter->right);
+    } else if (strcmp(param_iter->token, "parameter") == 0) {
+        if (param_iter->left && param_iter->right) {
+            VarType param_type = string_to_type(param_iter->left->token);
+            char* param_name = param_iter->right->token;
+            fprintf(stderr, "[INSERT] Recursive Param '%s' of type %s\n", param_name, type_to_string(param_type));
+            insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
+        }
+    } else {
+        fprintf(stderr, "[WARNING] Unexpected param_iter->token = %s\n", param_iter->token);
+    }
+}
+
+static inline void push_func_scope(void)
+{
+    func_scope_stack[++func_scope_top] = current_function_scope_id;
+}
+
+static inline void pop_func_scope(void)
+{
+    current_function_scope_id = func_scope_stack[func_scope_top--];
 }

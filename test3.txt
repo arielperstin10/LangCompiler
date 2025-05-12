@@ -33,8 +33,8 @@ def foo(par1 int:x; par2 int:y; par3 char:z): returns int
 var
     type int:a:0;
     type char:c;
-    type int:x,z;
-    type int:y;
+    type int:bb;
+    type int:y1;
     type string:b[100]:"moshe";
     type int:i;
     type int:n:15;
@@ -45,11 +45,11 @@ var
 begin
     a = 1;
     b = "moshe";
-    y = &x;
-    y = &z;
+    y = x;
+    y = i;
     temp = t*t;
     b[5] = 'N';
-    *a = 5;
+    a = 5;
 
     do:
     begin
