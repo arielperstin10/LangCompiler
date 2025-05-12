@@ -1,6 +1,47 @@
+def foo(par1 int:x; par2 int:y): returns int
+    var
+        type int:a,a2,a3,a4;
+    begin
+        if TRUE:
+                    a = (a + a) * 1;
+        a = 1+2*3;
+        for (a2=0 ; a2<10 and a!=5 ; a2 = a2 + 2):
+            begin
+                a = a +1;
+            end
+        while a < 10:
+            a = a + 1;
+        return a;
+    end
+
+
 def _main_():
-var
-    type char*:cp;
-begin
-    cp = null;
+    var
+        type int:a;
+        type int:b;
+        type bool:result;
+        type int:c;
+
+    begin
+        c = call foo(1,2);
+        if a+b>10:
+            a = (a + b) * 1;
+
+        def foo1(par1 int:x1; par2 int:y1; par3 int:z1; par4 real:f1): returns bool
+            begin
+                return TRUE;
+            end
+        result = call foo1(1,2,3,4.0);
 end
+
+def foo2(par1 int:x2; par2 int:y2; par3 int:z2; par4 real:f2): returns bool
+    var
+        type int:a;
+        type int:b;
+        type int:c;
+    begin
+        a = 1;
+        b = 2;
+        c = 3;
+        return TRUE;
+    end

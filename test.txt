@@ -1,4 +1,4 @@
-def main():
+def _main_():
 var
   type int:dummy;
 begin
@@ -7,7 +7,7 @@ begin
     type char:x;
     type int*:y;
   begin
-    y = &x;
+    x = 'a';
   end
   dummy = 0;
 end
