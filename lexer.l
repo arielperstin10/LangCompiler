@@ -17,6 +17,7 @@ int yywrap(void) { return 1; }
 %}
 
 %option yylineno
+%option noinput nounput
 
 DIGIT [0-9]
 HEXDIGIT [0-9a-fA-F]
@@ -48,6 +49,7 @@ ID [A-Za-z][A-Za-z0-9_]*
 "and"             { return AND; }
 "not"             { return NOT; }
 "!"               { return NOT; }
+"||"              { return OR; }
 "or"              { return OR; }
 "type"            { return TYPE; }
 "_main_"          { return MAIN; }
