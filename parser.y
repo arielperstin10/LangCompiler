@@ -3,7 +3,7 @@
     #include <stdlib.h>
     #include <string.h>
     #include <ctype.h>
-
+    //SEMANTIC CHEK SADSADA
     #define MAX_PARAMS 10
 
     int yylex();
@@ -54,6 +54,7 @@
     void insert_parameters(node* param_iter);
     static inline void push_func_scope(void);
     static inline void pop_func_scope(void);
+    int check_no_return_statements(node* stmt);
 
     node* root = NULL;
     Symbol* symbol_table = NULL;
@@ -64,6 +65,7 @@
     int current_function_scope_id = 0;
     int func_scope_stack[128];
     int func_scope_top = -1;
+    int is_semantic_error = 0;
 %}
 
 %debug
@@ -79,8 +81,6 @@
     VarType paramList[MAX_PARAMS];
 }
 
-%type <typeVal> type_specifier return_type
-%type <paramList> param_list
 
 %token <intVal> INTEGER
 %token <realVal> REAL
@@ -100,13 +100,15 @@
 %left MULT DIV MODULO
 %right NOT
 %right AMPERSAND
+%nonassoc IFX
+%nonassoc ELSE ELIF
 
 %type <nodePtr> code functions function parameters parameter_list parameter var declaration_list 
-%type <nodePtr> declaration type id_list statements statement assignment_statement if_statement 
-%type <nodePtr> while_statement do_while_statement for_statement for_header update_exp condition
+%type <nodePtr> declaration type id_list statements statement assignment_statement  
+%type <nodePtr>  for_header update_exp 
 %type <nodePtr> block_statement scope_entry return_statement function_call_statement function_call expression scoped_block
 %type <nodePtr> expr_list nested_function
-%type <nodePtr> statement_or_block
+%type <nodePtr> stmt_opt elif_unmatched elif_chain unmatched_if matched_if unmatched_statement matched_statement
 
 %%
 
@@ -117,25 +119,25 @@ functions: function {$$ = $1;}
         ;
 
 function: 
-        DEF MAIN '(' ')' ':' var BEGIN_TOKEN statements END
+        DEF MAIN '(' reset_param_counter parameters ')' ':'
+        {
+            if ($5 != NULL) {
+                is_semantic_error = 1;
+                yyerror("Semantic Error: _main_ must not have parameters.");
+                YYERROR;
+            }
+        } var BEGIN_TOKEN statements END
         {
             current_function_scope_id = function_scope_counter++;
-            node* stmt = $8;
-            while (stmt)
-            {
-                if (strcmp(stmt->token, "return_val") == 0)
-                {
-                    yyerror("Semantic Error: _main_ must not contain return statements.");
-                    YYERROR;
-                }
-                stmt = stmt->right;
+            if (check_no_return_statements($11)) {
+                YYERROR;
             }
             insert_symbol("_main_", TYPE_INVALID, 1, TYPE_INVALID, NULL, 0);
             enter_scope();    
 
             $$ = mknode("FUNC",
-                        mknode("main", NULL, $6),
-                        mknode("body", $8, NULL));
+                        mknode("main", NULL, $9),
+                        mknode("body", $11, NULL));
             exit_scope();    
         }
         | DEF IDENTIFIER '(' reset_param_counter parameters ')' ':' RETURNS type
@@ -153,9 +155,9 @@ function:
         {   
             VarType declared_type = string_to_type($9->token);
             node* last_stmt = $13;
-            while (last_stmt && strcmp(last_stmt->token,"statements")==0 && last_stmt->right)
-                last_stmt = last_stmt->right;
-            node* final = (last_stmt && strcmp(last_stmt->token,"statements")==0) ? last_stmt->left : last_stmt;
+            while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->left)
+                last_stmt = last_stmt->left; 
+            node* final = last_stmt;
             if (!final || (strcmp(final->token,"return_val")!=0 &&
                         strcmp(final->token,"return_void")!=0))
             {
@@ -207,10 +209,10 @@ function:
         var BEGIN_TOKEN statements END
         {   
             node* last_stmt = $11;
-            while (last_stmt && last_stmt->right)
-                last_stmt = last_stmt->right;
+            while (last_stmt && strcmp(last_stmt->token, "statements") == 0 && last_stmt->left)
+                last_stmt = last_stmt->left; 
 
-            if (last_stmt && strcmp(last_stmt->token,"return_val")==0)
+            if (last_stmt && strcmp(last_stmt->token, "return_val") == 0)
             {
                 yyerror("Error: function without RETURNS must not have a return statement");
                 YYERROR;
@@ -248,7 +250,8 @@ parameter: IDENTIFIER type ':' IDENTIFIER {
 
     int current_num = atoi(&$1[3]);
     if (current_num != last_param_number + 1) {
-        yyerror("parameter numbers must be in strictly increasing order (par1, par2, ...).");
+        is_semantic_error = 1;
+        yyerror("Semantic Error: parameter numbers must be in strictly increasing order (par1, par2, ...).");
         YYERROR;
     }
 
@@ -314,11 +317,10 @@ id_list: IDENTIFIER {$$ = mknode($1, NULL, NULL);}
     }
     ;
 
-statements:  /* empty */ { $$ = NULL; } 
-    | statement {$$ = $1;}
-    | statement statements {$$ = mknode("statements", $1, $2);}
-    | nested_function {$$ = $1;}
-    | nested_function statements {$$ = mknode("statements", $1, $2);}
+statements
+    : /* empty */                                    { $$ = NULL;                                    }
+    | statements statement                           { $$ = mknode("statements", $2, $1);            }
+    | statements nested_function                     { $$ = mknode("statements", $2, $1);            }
     ;
 
 
@@ -360,15 +362,131 @@ nested_function :
         }
         ;
 
-statement: assignment_statement {$$ = $1;}
-    | if_statement {$$ = $1;}
-    | while_statement {$$ = $1;}
-    | for_statement {$$ = $1;}
-    | do_while_statement {$$ = $1;}
-    | block_statement {$$ = $1;}
-    | return_statement {$$ = $1;}
-    | function_call_statement {$$ = $1;}
-    ;
+statement:
+    matched_statement {$$ = $1;}
+  | unmatched_statement {$$ = $1;}
+  ;
+
+  matched_statement:
+    matched_if
+  | WHILE expression ':' matched_statement {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'while' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("while", $2, $4);
+    }
+  | FOR for_header ':' matched_statement { $$ = mknode("for", $2, $4); }
+  | DO ':' matched_statement WHILE expression ';' {
+        VarType cond_type = infer_type($5);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'do-while' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("do-while", $3, mknode("cond", $5, NULL));
+    }
+  | block_statement
+  | assignment_statement
+  | return_statement
+  | function_call_statement
+  ;
+
+unmatched_statement:
+    unmatched_if
+  | WHILE expression ':' unmatched_statement {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'while' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("while", $2, $4);
+    }
+  | FOR for_header ':' unmatched_statement { $$ = mknode("for", $2, $4); }
+  | DO ':' unmatched_statement WHILE expression ';' {
+        VarType cond_type = infer_type($5);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'do-while' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("do-while", $3, mknode("cond", $5, NULL));
+    }
+  ;
+
+matched_if:
+    IF expression ':' matched_statement ELSE ':' matched_statement {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'if' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("if-full", mknode("cond", $2, NULL), mknode("then", $4, mknode("else", $7, NULL)));
+    }
+  | IF expression ':' matched_statement elif_chain %prec IFX {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'if' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("if-elif", mknode("cond", $2, NULL), mknode("then", $4, $5));
+    }
+  ;
+
+unmatched_if:   
+    IF expression ':' statement %prec IFX {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'if' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+    $$ = mknode("if", $2, $4);
+    }
+    | IF expression ':' matched_statement elif_unmatched {
+        $$ = mknode("if-elif", mknode("cond", $2, NULL), mknode("then", $4, $5));
+    }
+  ;
+
+elif_chain:
+    ELIF expression ':' matched_statement %prec IFX {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'elif' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("elif", mknode("cond", $2, NULL), $4);
+    }
+    | ELIF expression ':' matched_statement elif_chain {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'elif' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("elif", mknode("cond", $2, NULL), mknode("then", $4, $5));
+    }
+    | ELIF expression ':' matched_statement ELSE ':' matched_statement
+    {
+        $$ = mknode("elif-else", mknode("cond", $2, NULL), mknode("then", $4, mknode("else", $7, NULL)));
+    }
+  ;
+
+elif_unmatched:
+    ELIF expression ':' unmatched_statement %prec IFX {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'elif' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("elif", mknode("cond", $2, NULL), $4);
+    }
+  | ELIF expression ':' matched_statement elif_unmatched {
+        VarType cond_type = infer_type($2);
+        if (cond_type != TYPE_BOOL) {
+            fprintf(stderr, "Semantic Error: 'elif' expects bool, got '%s'.\n", type_to_string(cond_type));
+            exit(1);
+        }
+        $$ = mknode("elif", mknode("cond", $2, NULL), mknode("then", $4, $5));
+    }
+  ;
 
 assignment_statement:
     IDENTIFIER ASSIGN expression ';' 
@@ -391,7 +509,6 @@ assignment_statement:
 
         VarType rhs_type = infer_type($3);
 
-        // Allow assignment of NULL to pointer types only
         if (rhs_type == TYPE_INVALID && strcmp($3->token, "null") == 0) {
             if (lhs_type != TYPE_INT_PTR && lhs_type != TYPE_CHAR_PTR && lhs_type != TYPE_REAL_PTR) {
                 fprintf(stderr, "Semantic Error: 'null' can only be assigned to pointer types, got '%s'.\n", type_to_string(lhs_type));
@@ -399,8 +516,9 @@ assignment_statement:
             }
         } else if (lhs_type != rhs_type) {
             if (lhs_type == TYPE_REAL && rhs_type == TYPE_INT) {
-                // allowed promotion
                 fprintf(stderr, "[INFO] Implicitly promoting 'int' to 'real' for assignment.\n");
+            } else if (lhs_type == TYPE_INT && rhs_type == TYPE_REAL) {
+                fprintf(stderr, "[INFO] Implicitly demoting 'real' to 'int' for assignment.\n");
             } else {
                 fprintf(stderr, "Semantic Error: cannot assign '%s' to variable of type '%s'.\n",
                         type_to_string(rhs_type), type_to_string(lhs_type));
@@ -410,37 +528,6 @@ assignment_statement:
 
         $$ = mknode("assign", mknode($1, NULL, NULL), $3);
     }
-    | IDENTIFIER '[' expression ']' ASSIGN CHAR_LITERAL ';' {
-
-        if (!is_variable_defined($1)) {
-            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
-            exit(1);
-        }
-        
-        VarType index_type = infer_type($3);
-        if (index_type != TYPE_INT) {
-            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
-            exit(1);
-        }
-        Symbol* sym = symbol_table;
-        VarType base_type = TYPE_INVALID;
-        while (sym) {
-            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
-                base_type = sym->type;
-                break;
-            }
-            sym = sym->next;
-        }
-
-        if (base_type != TYPE_STRING) {
-            fprintf(stderr, "Semantic Error: index operator '[]' is only allowed on strings, got '%s'.\n", type_to_string(base_type));
-            exit(1);
-        }
-        char char_str[2];
-        char_str[0] = $6;
-        char_str[1] = '\0';
-        $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(char_str, NULL, NULL));
-    }
     | MULT IDENTIFIER ASSIGN expression ';' 
     {
         if (!is_variable_defined($2)) 
@@ -449,7 +536,6 @@ assignment_statement:
             exit(1);
         }
 
-        // Check pointer type
         Symbol* sym = symbol_table;
         VarType ptr_type = TYPE_INVALID;
         while (sym) {
@@ -476,43 +562,8 @@ assignment_statement:
                     type_to_string(expr_type), type_to_string(ptr_type));
             exit(1);
         }
+
         $$ = mknode("pointer_assign", mknode($2, NULL, NULL), $4);
-    }
-    | IDENTIFIER ASSIGN AMPERSAND IDENTIFIER ';' 
-    {
-        if (!is_variable_defined($1) || !is_variable_defined($4)) {
-            fprintf(stderr, "Semantic Error: Undefined variable in reference assignment.\n");
-            exit(1);
-        }
-
-        // LHS should be pointer to RHS type
-        VarType lhs_type = TYPE_INVALID;
-        VarType rhs_type = TYPE_INVALID;
-        Symbol *sym = symbol_table;
-
-        while (sym) {
-            if (!sym->is_function && strcmp(sym->name, $1) == 0) lhs_type = sym->type;
-            if (!sym->is_function && strcmp(sym->name, $4) == 0) rhs_type = sym->type;
-            sym = sym->next;
-        }
-
-        VarType expected_ptr_type = TYPE_INVALID;
-        switch (rhs_type) {
-            case TYPE_INT: expected_ptr_type = TYPE_INT_PTR; break;
-            case TYPE_CHAR: expected_ptr_type = TYPE_CHAR_PTR; break;
-            case TYPE_REAL: expected_ptr_type = TYPE_REAL_PTR; break;
-            default:
-                fprintf(stderr, "Semantic Error: Cannot take address of variable of type '%s'.\n", type_to_string(rhs_type));
-                exit(1);
-        }
-
-        if (lhs_type != expected_ptr_type) {
-            fprintf(stderr, "Semantic Error: cannot assign address of '%s' to variable of type '%s'.\n",
-                    type_to_string(rhs_type), type_to_string(lhs_type));
-            exit(1);
-        }
-
-        $$ = mknode("ref_assign", mknode($1, NULL, NULL), mknode($4, NULL, NULL));
     }
     | IDENTIFIER ASSIGN NULL_TOKEN ';' 
     {
@@ -535,45 +586,11 @@ assignment_statement:
             fprintf(stderr, "Semantic Error: 'null' can only be assigned to pointer types, got '%s'.\n", type_to_string(lhs_type));
             exit(1);
         }
+
         $$ = mknode("null_assign", mknode($1, NULL, NULL), mknode("null", NULL, NULL));
     }
-    | IDENTIFIER '[' expression ']' ASSIGN INTEGER ';' {
-        if (!is_variable_defined($1)) {
-            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
-            exit(1);
-        }
-        VarType index_type = infer_type($3);
-        if (index_type != TYPE_INT) {
-            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
-            exit(1);
-        }
-        Symbol* sym = symbol_table;
-        VarType base_type = TYPE_INVALID;
-        while (sym) {
-            if (!sym->is_function && strcmp(sym->name, $1) == 0) {
-                base_type = sym->type;
-                break;
-            }
-            sym = sym->next;
-        }
-
-        if (base_type != TYPE_STRING) {
-            fprintf(stderr, "Semantic Error: index operator '[]' is only allowed on strings, got '%s'.\n", type_to_string(base_type));
-            exit(1);
-        }
-        char int_str[20];
-        sprintf(int_str, "%d", $6);
-        $$ = mknode("array_assign", mknode($1, $3, NULL), mknode(int_str, NULL, NULL));
-    }
-    | IDENTIFIER '[' expression ']' ASSIGN STRING_LITERAL ';' {
-        VarType index_type = infer_type($3);
-        if (index_type != TYPE_INT) {
-            fprintf(stderr, "Semantic Error: array index must be of type 'int', got '%s'.\n", type_to_string(index_type));
-            exit(1);
-        }
-        $$ = mknode("array_assign", mknode($1, $3, NULL), mknode($6, NULL, NULL));
-    }
-    | IDENTIFIER '[' expression ']' ASSIGN expression ';' {
+    | IDENTIFIER '[' expression ']' ASSIGN expression ';' 
+    {
         if (!is_variable_defined($1)) {
             fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $1);
             exit(1);
@@ -601,97 +618,16 @@ assignment_statement:
         }
 
         $$ = mknode("array_assign", mknode($1, $3, NULL), $6);
-    }
-    ;
+    };
 
-if_statement:
-    IF expression ':' statement_or_block 
-    {
-        VarType cond_type = infer_type($2);
-        if (cond_type != TYPE_BOOL) 
-        {
-            fprintf(stderr, "Semantic Error: condition in 'if' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
-            exit(1);
-        }
-        $$ = mknode("if", $2, $4);
-    }
-    | IF expression ':' statement_or_block ELSE ':' statement_or_block 
-    {
-        VarType cond_type = infer_type($2);
-        if (cond_type != TYPE_BOOL) 
-        {
-            fprintf(stderr, "Semantic Error: condition in 'if-else' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
-            exit(1);
-        }
-        $$ = mknode("if-else", $2, mknode("then", $4, mknode("else", $7, NULL)));
-    }
-    | IF expression ':' statement_or_block ELIF expression ':' statement_or_block 
-    {
-        VarType if_cond_type = infer_type($2);
-        VarType elif_cond_type = infer_type($6);
-        if (if_cond_type != TYPE_BOOL) 
-        {
-            fprintf(stderr, "Semantic Error: condition in 'if' must be of type 'bool', got '%s'.\n", type_to_string(if_cond_type));
-            exit(1);
-        }
-        if (elif_cond_type != TYPE_BOOL) 
-        {
-            fprintf(stderr, "Semantic Error: condition in 'elif' must be of type 'bool', got '%s'.\n", type_to_string(elif_cond_type));
-            exit(1);
-        }
-        $$ = mknode("if-elif", $2, mknode("then", $4, mknode("elif-cond", $6, $8)));
-    }
-    | IF expression ':' statement_or_block ELIF expression ':' statement_or_block ELSE ':' statement_or_block 
-    {
-        VarType if_cond_type = infer_type($2);
-        VarType elif_cond_type = infer_type($6);
-        if (if_cond_type != TYPE_BOOL) 
-        {
-            fprintf(stderr, "Semantic Error: condition in 'if' must be of type 'bool', got '%s'.\n", type_to_string(if_cond_type));
-            exit(1);
-        }
-        if (elif_cond_type != TYPE_BOOL) 
-        {
-            fprintf(stderr, "Semantic Error: condition in 'elif' must be of type 'bool', got '%s'.\n", type_to_string(elif_cond_type));
-            exit(1);
-        }
-        $$ = mknode("if-elif-else", $2, mknode("then", $4, mknode("elif-cond", $6, mknode("elif-then", $8, mknode("else", $11, NULL)))));
-    }
-;
 
-statement_or_block: 
-    block_statement {$$ = $1;}
-    | statement {$$ = $1;}
-    ;
 
-while_statement:
-    WHILE expression ':' statement_or_block 
-    {
-        VarType cond_type = infer_type($2);
-        if (cond_type != TYPE_BOOL) {
-            fprintf(stderr, "Semantic Error: condition in 'while' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
-            exit(1);
-        }
-        $$ = mknode("while", $2, $4);
-    }
-;
 
-do_while_statement:
-    DO ':' statement_or_block WHILE expression ';' 
-    {
-        VarType cond_type = infer_type($5);
-        if (cond_type != TYPE_BOOL) {
-            fprintf(stderr, "Semantic Error: condition in 'do-while' must be of type 'bool', got '%s'.\n", type_to_string(cond_type));
-            exit(1);
-        }
-        $$ = mknode("do-while", $3, mknode("cond", $5, NULL));
-    }
-;
 
-for_statement:
-    FOR for_header ':' statement_or_block {$$ = mknode("for", $2, $4);}
-    | FOR for_header ':' var statement_or_block {$$ = mknode("for", $2, mknode("block", $5, $4));}
-;
+
+
+
+
 
 for_header:
     '(' IDENTIFIER ASSIGN expression ';' expression ';' update_exp ')' 
@@ -709,34 +645,17 @@ update_exp:
     IDENTIFIER ASSIGN expression {$$ = mknode("update", mknode($1, NULL, NULL), $3);}
     ;
 
-condition:
-    expression {$$ = $1;} // Just pass through the expression
-    | NOT condition {$$ = mknode("not", $2, NULL);}
-    | '(' condition ')' {$$ = $2;}
-    | TRUE {$$ = mknode("true", NULL, NULL);}
-    | FALSE {$$ = mknode("false", NULL, NULL);}
-    ;
-
 scope_entry: /* nothing */ { enter_scope(); $$ = NULL; };
 
-scoped_block:
-    scope_entry BEGIN_TOKEN END {
-        exit_scope();
-        $$ = mknode("block", NULL, NULL);
-    }
-  | scope_entry BEGIN_TOKEN statements END {
-        exit_scope();
-        $$ = mknode("block", $3, NULL);
-    }
-  | scope_entry var BEGIN_TOKEN END {
-        exit_scope();
-        $$ = mknode("block", NULL, $2);
-    }
-  | scope_entry var BEGIN_TOKEN statements END {
-        exit_scope();
-        $$ = mknode("block", $4, $2);
-    }
-;
+scoped_block
+    : scope_entry var BEGIN_TOKEN stmt_opt END
+        {
+            exit_scope();
+            $$ = mknode("block", $4 , $2);
+        }
+    ;
+
+stmt_opt: statements { $$ = $1; };
 
 block_statement:
     scoped_block { $$ = $1; }
@@ -749,7 +668,6 @@ return_statement:
 
 function_call_statement:
     function_call ';' {$$ = $1;}
-    | IDENTIFIER ASSIGN function_call ';' {$$ = mknode("assign", mknode($1, NULL, NULL), $3);}
     ;
 
 function_call:
@@ -872,15 +790,8 @@ expression:
 
         $$ = mknode("&", mknode("index", mknode($2, NULL, NULL), $4), NULL);
     }
-    | MULT IDENTIFIER {
-        if (!is_variable_defined($2)) {
-            fprintf(stderr, "Semantic Error: Variable '%s' used before its definition.\n", $2);
-            exit(1);
-        }
-        $$ = mknode("deref", mknode($2, NULL, NULL), NULL);
-    }
     | MULT expression {$$ = mknode("*", $2, NULL);}
-    | | NOT expression 
+    | NOT expression 
     {
         VarType t = infer_type($2);
         if (t != TYPE_BOOL) {
@@ -1007,7 +918,12 @@ void printTree(node* tree, int level)
 
 int yyerror(const char* s)
 {
-    fprintf(stderr, "Error: %s at line %d near token '%s'\n", s, yylineno, yytext);
+    if (is_semantic_error) {
+        fprintf(stderr, "%s\n", s);  
+        is_semantic_error = 0;       
+    } else {
+        fprintf(stderr, "Error: %s at line %d near token '%s'\n", s, yylineno, yytext);
+    }
     return 0;
 }
 
@@ -1076,8 +992,12 @@ void insert_symbol(char* name, VarType type, int is_function, VarType return_typ
     // Check for redefinition in the same scope
     Symbol* sym = symbol_table;
     while (sym) {
-        if (sym->scope_level == current_scope_level && strcmp(sym->name, name) == 0 && sym->function_scope_id == current_function_scope_id) {
-            fprintf(stderr, "Semantic Error: Redefinition of '%s' in the same scope.\n", name);
+        if (strcmp(sym->name, name) == 0 && sym->is_function && is_function) {
+            fprintf(stderr, "Semantic Error: Redefinition of function '%s'.\n", name);
+            exit(1);
+        }
+        if (!is_function && sym->scope_level == current_scope_level && strcmp(sym->name, name) == 0 && sym->function_scope_id == current_function_scope_id) {
+            fprintf(stderr, "Semantic Error: Redefinition of variable '%s' in the same scope.\n", name);
             exit(1);
         }
         sym = sym->next;
@@ -1249,6 +1169,53 @@ VarType infer_type(node* expr) {
         exit(1);
     }
 
+    if (strcmp(expr->token, "*") == 0) {
+        if (expr->right == NULL) {
+            // This is unary dereference
+            VarType inner = infer_type(expr->left);
+            switch (inner) {
+                case TYPE_INT_PTR: return TYPE_INT;
+                case TYPE_CHAR_PTR: return TYPE_CHAR;
+                case TYPE_REAL_PTR: return TYPE_REAL;
+                default:
+                    fprintf(stderr, "Semantic Error: unary '*' can only be applied to pointer types, got '%s'.\n", type_to_string(inner));
+                    exit(1);
+            }
+        } else {
+            // This is binary multiplication
+            VarType l = infer_type(expr->left);
+            VarType r = infer_type(expr->right);
+            if ((l == TYPE_INT || l == TYPE_REAL) && (r == TYPE_INT || r == TYPE_REAL)) {
+                return (l == TYPE_REAL || r == TYPE_REAL) ? TYPE_REAL : TYPE_INT;
+            }
+            fprintf(stderr, "Semantic Error: '*' operands must be int or real, got '%s' and '%s'.\n",
+                    type_to_string(l), type_to_string(r));
+            exit(1);
+        }
+    }
+
+    if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+
+        // pointer ± int
+        if ((l == TYPE_INT_PTR || l == TYPE_CHAR_PTR || l == TYPE_REAL_PTR) && r == TYPE_INT)
+            return l;
+
+        // int + pointer (commutative addition)
+        if (strcmp(expr->token, "+") == 0 &&
+            l == TYPE_INT &&
+            (r == TYPE_INT_PTR || r == TYPE_CHAR_PTR || r == TYPE_REAL_PTR))
+            return r;
+
+        // pointer ± pointer → error
+        if ((l == TYPE_INT_PTR || l == TYPE_CHAR_PTR || l == TYPE_REAL_PTR) &&
+            (r == TYPE_INT_PTR || r == TYPE_CHAR_PTR || r == TYPE_REAL_PTR)) {
+            fprintf(stderr, "Semantic Error: cannot apply '%s' between two pointers.\n", expr->token);
+            exit(1);
+        }
+    }
+
     // Binary arithmetic operators
     if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0 ||
         strcmp(expr->token, "*") == 0 || strcmp(expr->token, "/") == 0) {
@@ -1336,7 +1303,12 @@ VarType infer_type(node* expr) {
 
     // Indexing
     if (strcmp(expr->token, "index") == 0 && expr->left) {
-        return infer_type(expr->left);
+        VarType base_type = infer_type(expr->left);
+        if (base_type == TYPE_STRING) {
+            return TYPE_CHAR;
+        }
+        fprintf(stderr, "Semantic Error: index operator '[]' is only valid on strings, got '%s'.\n", type_to_string(base_type));
+        exit(1);
     }
 
     // Function call
@@ -1470,4 +1442,20 @@ static inline void push_func_scope(void)
 static inline void pop_func_scope(void)
 {
     current_function_scope_id = func_scope_stack[func_scope_top--];
+}
+
+int check_no_return_statements(node* stmt) {
+    if (!stmt) return 0;
+
+    // If it's a nested function, don't check its subtree
+    if (strcmp(stmt->token, "nested_func") == 0)
+        return 0;
+
+    if (strcmp(stmt->token, "return_val") == 0) {
+        is_semantic_error = 1;
+        yyerror("Semantic Error: _main_ must not contain return statements.");
+        return 1;
+    }
+
+    return check_no_return_statements(stmt->left) || check_no_return_statements(stmt->right);
 }
