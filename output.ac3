@@ -1,37 +1,33 @@
 
-foo:
-    BeginFunc 16
-    t0 = 23
-    a = t0
-    if cond != 0 goto L1
-    goto L2
+power:
+    BeginFunc 28
+    t0 = 1
+    result = t0
+    t1 = 0
+    i = t1
 L1:
-    t1 = 10
-    b = t1
+    if i < exp goto L2
     goto L3
 L2:
-    t2 = 19
-    b = t2
+    t2 = result * base
+    result = t2
+    t3 = 1
+    t4 = i + t3
+    i = t4
+    goto L1
 L3:
-    t3 = b + a
-    Return t3
+    Return result
     EndFunc
 
 main:
-    BeginFunc 28
-    t4 = 0
-    a = t4
-L4:
-    if a < 10 goto L5
-    goto L6
-L5:
-    t5 = 3.140000
-    PushParam t5
-    t6 = LCall foo
+    BeginFunc 24
+    t5 = 2
+    base = t5
+    t6 = 8
+    exponent = t6
+    PushParam exponent
+    PushParam base
+    t7 = LCall power
     PopParams 8
-    b = t6
-    t7 = a + b
-    a = t7
-    goto L4
-L6:
+    answer = t7
     EndFunc

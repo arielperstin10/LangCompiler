@@ -1624,7 +1624,8 @@ static void genStmt(node *s)
     }
 
     if (!strcmp(s->token,"if-full")) {
-        node *cond_node = s->left;
+        node *cond_wrapper = s->left;          // "cond" wrapper node
+        node *cond_node = cond_wrapper->left;  // actual condition (==, !=, etc.)
         node *then_node = s->right->left;  
         node *else_node = s->right->right->left; 
         
@@ -1738,31 +1739,53 @@ static void genFunction(node *f)
     /* frame size = locals + total temp bytes we just counted */
     int tempsBytes = tempBytesInFunc;
 
-    /* count local decls - look for VAR declarations in the function header */
+    /* count local decls - look for VAR declarations in the body structure */
     int localsBytes = 0;
-    if (header->right) { // VAR declarations
-        node *varNode = header->right;
-        if (varNode && strcmp(varNode->token, "VAR") == 0) {
-            // Count variables in declarations
-            node *decls = varNode->left;
-            while (decls) {
-                node *single = (strcmp(decls->token, "decls") == 0) ? decls->left : decls;
-                if (single && strcmp(single->token, "DECL") == 0) {
-                    const char *typ = single->left->token;
-                    
-                    // Count identifiers in this declaration
-                    int nvars = 0;
-                    node *ids = single->right;
-                    while (ids) {
-                        nvars++;
-                        ids = ids->right;
-                    }
-                    if (nvars == 0) nvars = 1;
-                    
-                    localsBytes += nvars * sizeofType(typ);
+    
+    // Look for VAR in function header (for functions with parameters and VAR)
+    if (header->right && header->right->right && strcmp(header->right->right->token, "VAR") == 0) {
+        node *varNode = header->right->right;
+        node *decls = varNode->left;
+        while (decls) {
+            node *single = (strcmp(decls->token, "decls") == 0) ? decls->left : decls;
+            if (single && strcmp(single->token, "DECL") == 0) {
+                const char *typ = single->left->token;
+                
+                // Count identifiers in this declaration
+                int nvars = 0;
+                node *ids = single->right;
+                while (ids) {
+                    nvars++;
+                    ids = ids->right;
                 }
-                decls = (strcmp(decls->token, "decls") == 0) ? decls->right : NULL;
+                if (nvars == 0) nvars = 1;
+                
+                localsBytes += nvars * sizeofType(typ);
             }
+            decls = (strcmp(decls->token, "decls") == 0) ? decls->right : NULL;
+        }
+    }
+    // Look for VAR in main function (header->right for main)
+    else if (header->right && strcmp(header->right->token, "VAR") == 0) {
+        node *varNode = header->right;
+        node *decls = varNode->left;
+        while (decls) {
+            node *single = (strcmp(decls->token, "decls") == 0) ? decls->left : decls;
+            if (single && strcmp(single->token, "DECL") == 0) {
+                const char *typ = single->left->token;
+                
+                // Count identifiers in this declaration
+                int nvars = 0;
+                node *ids = single->right;
+                while (ids) {
+                    nvars++;
+                    ids = ids->right;
+                }
+                if (nvars == 0) nvars = 1;
+                
+                localsBytes += nvars * sizeofType(typ);
+            }
+            decls = (strcmp(decls->token, "decls") == 0) ? decls->right : NULL;
         }
     }
     
