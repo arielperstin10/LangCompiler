@@ -1,0 +1,21 @@
+def process_data(par1 int:value):
+var
+ type int:result;
+begin
+if value > 0:
+begin
+result = value * 2;
+end
+else:
+begin
+result = value;
+end
+end
+
+def _main_():
+var
+ type int:data;
+begin
+data = 42;
+call process_data(data);
+end 

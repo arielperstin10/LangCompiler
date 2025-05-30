@@ -1,0 +1,17 @@
+def average(par1 real:a; par2 real:b): returns real
+var
+ type real:sum,result;
+begin
+sum = a + b;
+result = sum / 2.0;
+return result;
+end
+
+def _main_():
+var
+ type real:x,y,avg;
+begin
+x = 10.5;
+y = 7.3;
+avg = call average(x, y);
+end 

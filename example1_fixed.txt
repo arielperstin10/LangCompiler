@@ -1,0 +1,23 @@
+def calculate(par1 int:num): returns int
+var
+ type int:result,temp;
+begin
+if num < 0:
+begin
+result = -1;
+end
+else:
+begin
+temp = num * 2;
+result = temp + 5;
+end
+return result;
+end
+
+def _main_():
+var
+ type int:x,y;
+begin
+x = 15;
+y = call calculate(x);
+end 
