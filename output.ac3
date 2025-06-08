@@ -1,15 +1,15 @@
 
-power:
+factorial:
     BeginFunc 28
     t0 = 1
     result = t0
-    t1 = 0
+    t1 = 1
     i = t1
 L1:
-    if i < exp goto L2
+    if i <= n goto L2
     goto L3
 L2:
-    t2 = result * base
+    t2 = result * i
     result = t2
     t3 = 1
     t4 = i + t3
@@ -20,14 +20,11 @@ L3:
     EndFunc
 
 main:
-    BeginFunc 24
-    t5 = 2
-    base = t5
-    t6 = 8
-    exponent = t6
-    PushParam exponent
-    PushParam base
-    t7 = LCall power
-    PopParams 8
-    answer = t7
+    BeginFunc 16
+    t5 = 5
+    num = t5
+    PushParam num
+    t6 = LCall factorial
+    PopParams 4
+    fact = t6
     EndFunc

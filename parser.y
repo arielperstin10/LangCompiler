@@ -873,7 +873,6 @@ int main()
         generate_3ac(root);
         printf("3AC code generated in output.ac3\n");
         
-        visualize_ast(root, "", 1);
         printf("Semantic checks passed.\n");
     }
 
