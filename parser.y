@@ -55,6 +55,9 @@
     static inline void push_func_scope(void);
     static inline void pop_func_scope(void);
     int check_no_return_statements(node* stmt);
+    
+    // 3AC generation functions
+    void generate_3ac(node* ast);
 
     node* root = NULL;
     Symbol* symbol_table = NULL;
@@ -858,14 +861,18 @@ int main()
     if (yyparse() == 0) {
         if (main_count == 0) 
         {
-            fprintf(stderr, "Semantic Error: Missing '_main_' function.\n");
+            fprintf(stderr, "Semantic  Error: Missing '_main_' function.\n");
             return 1;
         } else if (main_count > 1) 
         {
             fprintf(stderr, "Semantic Error: Multiple '_main_' functions are not allowed.\n");
             return 1;
         }
-        visualize_ast(root, "", 1);
+        
+        // Generate 3AC code
+        generate_3ac(root);
+        printf("3AC code generated in output.ac3\n");
+        
         printf("Semantic checks passed.\n");
     }
 
@@ -1131,11 +1138,7 @@ VarType infer_type(node* expr) {
     if (strchr(expr->token, '.') != NULL) {
         return TYPE_REAL;
     }
-    /*
-    if (strlen(expr->token) == 1 && isprint(expr->token[0])) {
-        return TYPE_CHAR;
-    }
-    */
+
     if (strcmp(expr->token, "CHAR_LITERAL") == 0 && expr->left && expr->left->token) {
         return TYPE_CHAR;
     }
@@ -1145,82 +1148,20 @@ VarType infer_type(node* expr) {
         return TYPE_STRING;
     }
 
-    // Unary minus
-    if (strcmp(expr->token, "unary-") == 0 && expr->left) {
-        VarType t = infer_type(expr->left);
-        if (t == TYPE_INT || t == TYPE_REAL) return t;
-        fprintf(stderr, "Semantic Error: unary '-' expects int or real, got '%s'.\n", type_to_string(t));
-        exit(1);
-    }
-
-    // Logical NOT
-    if (strcmp(expr->token, "not") == 0 && expr->left) {
-        VarType t = infer_type(expr->left);
-        if (t == TYPE_BOOL) return TYPE_BOOL;
-        fprintf(stderr, "Semantic Error: 'not' expects bool, got '%s'.\n", type_to_string(t));
-        exit(1);
-    }
-
-    // Absolute value
-    if (strcmp(expr->token, "|") == 0 && expr->left) {
-        VarType t = infer_type(expr->left);
-        if (t == TYPE_INT || t == TYPE_REAL || t == TYPE_STRING) return TYPE_INT;
-        fprintf(stderr, "Semantic Error: '|' operator expects int, real, or string, got '%s'.\n", type_to_string(t));
-        exit(1);
-    }
-
-    if (strcmp(expr->token, "*") == 0) {
-        if (expr->right == NULL) {
-            // This is unary dereference
-            VarType inner = infer_type(expr->left);
-            switch (inner) {
-                case TYPE_INT_PTR: return TYPE_INT;
-                case TYPE_CHAR_PTR: return TYPE_CHAR;
-                case TYPE_REAL_PTR: return TYPE_REAL;
-                default:
-                    fprintf(stderr, "Semantic Error: unary '*' can only be applied to pointer types, got '%s'.\n", type_to_string(inner));
-                    exit(1);
-            }
-        } else {
-            // This is binary multiplication
-            VarType l = infer_type(expr->left);
-            VarType r = infer_type(expr->right);
-            if ((l == TYPE_INT || l == TYPE_REAL) && (r == TYPE_INT || r == TYPE_REAL)) {
-                return (l == TYPE_REAL || r == TYPE_REAL) ? TYPE_REAL : TYPE_INT;
-            }
-            fprintf(stderr, "Semantic Error: '*' operands must be int or real, got '%s' and '%s'.\n",
-                    type_to_string(l), type_to_string(r));
-            exit(1);
-        }
-    }
-
-    if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0) {
-        VarType l = infer_type(expr->left);
-        VarType r = infer_type(expr->right);
-
-        // pointer ± int
-        if ((l == TYPE_INT_PTR || l == TYPE_CHAR_PTR || l == TYPE_REAL_PTR) && r == TYPE_INT)
-            return l;
-
-        // int + pointer (commutative addition)
-        if (strcmp(expr->token, "+") == 0 &&
-            l == TYPE_INT &&
-            (r == TYPE_INT_PTR || r == TYPE_CHAR_PTR || r == TYPE_REAL_PTR))
-            return r;
-
-        // pointer ± pointer → error
-        if ((l == TYPE_INT_PTR || l == TYPE_CHAR_PTR || l == TYPE_REAL_PTR) &&
-            (r == TYPE_INT_PTR || r == TYPE_CHAR_PTR || r == TYPE_REAL_PTR)) {
-            fprintf(stderr, "Semantic Error: cannot apply '%s' between two pointers.\n", expr->token);
-            exit(1);
-        }
-    }
-
     // Binary arithmetic operators
     if (strcmp(expr->token, "+") == 0 || strcmp(expr->token, "-") == 0 ||
-        strcmp(expr->token, "*") == 0 || strcmp(expr->token, "/") == 0) {
+        strcmp(expr->token, "*") == 0 || strcmp(expr->token, "/") == 0 ||
+        strcmp(expr->token, "%") == 0) {
         VarType l = infer_type(expr->left);
         VarType r = infer_type(expr->right);
+        
+        // Special handling for modulo
+        if (strcmp(expr->token, "%") == 0) {
+            if (l == TYPE_INT && r == TYPE_INT) return TYPE_INT;
+            fprintf(stderr, "Semantic Error: '%%' operands must be int, got '%s' and '%s'.\n", type_to_string(l), type_to_string(r));
+            exit(1);
+        }
+        
         if ((l == TYPE_INT || l == TYPE_REAL) && (r == TYPE_INT || r == TYPE_REAL)) {
             return (l == TYPE_REAL || r == TYPE_REAL) ? TYPE_REAL : TYPE_INT;
         }
@@ -1229,85 +1170,18 @@ VarType infer_type(node* expr) {
         exit(1);
     }
 
-    if (strcmp(expr->token, "%") == 0) {
-        VarType l = infer_type(expr->left);
-        VarType r = infer_type(expr->right);
-        if (l == TYPE_INT && r == TYPE_INT) return TYPE_INT;
-        fprintf(stderr, "Semantic Error: '%%' operands must be int, got '%s' and '%s'.\n", type_to_string(l), type_to_string(r));
-        exit(1);
-    }
-
-    // Comparison operators
-    if (strcmp(expr->token, ">") == 0 || strcmp(expr->token, "<") == 0 ||
-        strcmp(expr->token, ">=") == 0 || strcmp(expr->token, "<=") == 0) {
+    // Comparison operations
+    if (strcmp(expr->token, "==") == 0 || strcmp(expr->token, "!=") == 0 ||
+        strcmp(expr->token, "<") == 0 || strcmp(expr->token, ">") == 0 ||
+        strcmp(expr->token, "<=") == 0 || strcmp(expr->token, ">=") == 0) {
         VarType l = infer_type(expr->left);
         VarType r = infer_type(expr->right);
         if ((l == TYPE_INT || l == TYPE_REAL) && (r == TYPE_INT || r == TYPE_REAL)) {
             return TYPE_BOOL;
         }
-        fprintf(stderr, "Semantic Error: Comparison requires int or real operands, got '%s' and '%s'.\n",
-                type_to_string(l), type_to_string(r));
-        exit(1);
-    }
-
-    // Equality
-    if (strcmp(expr->token, "==") == 0 || strcmp(expr->token, "!=") == 0) {
-        VarType l = infer_type(expr->left);
-        VarType r = infer_type(expr->right);
         if (l == r) return TYPE_BOOL;
-        fprintf(stderr, "Semantic Error: Equality operands must match, got '%s' and '%s'.\n",
+        fprintf(stderr, "Semantic Error: Comparison operands type mismatch '%s' and '%s'.\n",
                 type_to_string(l), type_to_string(r));
-        exit(1);
-    }
-
-    // Absolute value or string length operator (|expr| becomes strlen node)
-    if (strcmp(expr->token, "strlen") == 0) {
-        VarType inner = infer_type(expr->left);
-        if (inner == TYPE_STRING)
-            return TYPE_INT;
-        return TYPE_INVALID;
-    }
-
-    // Logical operators
-    if (strcmp(expr->token, "and") == 0 || strcmp(expr->token, "or") == 0) {
-        VarType l = infer_type(expr->left);
-        VarType r = infer_type(expr->right);
-        if (l == TYPE_BOOL && r == TYPE_BOOL) return TYPE_BOOL;
-        fprintf(stderr, "Semantic Error: Logical '%s' expects bool operands, got '%s' and '%s'.\n",
-                expr->token, type_to_string(l), type_to_string(r));
-        exit(1);
-    }
-
-    // Pointer dereference
-    if (strcmp(expr->token, "deref") == 0 && expr->left) {
-        VarType inner = infer_type(expr->left);
-        switch (inner) {
-            case TYPE_INT_PTR: return TYPE_INT;
-            case TYPE_CHAR_PTR: return TYPE_CHAR;
-            case TYPE_REAL_PTR: return TYPE_REAL;
-            default:
-                fprintf(stderr, "Semantic Error: unary '*' can only be applied to pointer types, got '%s'.\n", type_to_string(inner));
-                exit(1);
-        }
-    }
-
-    // Address-of
-    if (strcmp(expr->token, "&") == 0 && expr->left) {
-        VarType inner = infer_type(expr->left);
-        if (inner == TYPE_INT) return TYPE_INT_PTR;
-        if (inner == TYPE_CHAR) return TYPE_CHAR_PTR;
-        if (inner == TYPE_REAL) return TYPE_REAL_PTR;
-        fprintf(stderr, "Semantic Error: '&' expects int, char or real type, got '%s'.\n", type_to_string(inner));
-        exit(1);
-    }
-
-    // Indexing
-    if (strcmp(expr->token, "index") == 0 && expr->left) {
-        VarType base_type = infer_type(expr->left);
-        if (base_type == TYPE_STRING) {
-            return TYPE_CHAR;
-        }
-        fprintf(stderr, "Semantic Error: index operator '[]' is only valid on strings, got '%s'.\n", type_to_string(base_type));
         exit(1);
     }
 
@@ -1326,52 +1200,8 @@ VarType infer_type(node* expr) {
         sym = sym->next;
     }
 
-    if (strcmp(expr->token, "&") == 0 && expr->left) {
-        VarType inner_type = TYPE_INVALID;
-
-        if (strcmp(expr->left->token, "index") == 0) {
-            // Check if this is &something[index]
-            node* base = expr->left->left;
-            Symbol* sym = symbol_table;
-            while (sym) {
-                if (!sym->is_function && strcmp(sym->name, base->token) == 0) {
-                    inner_type = sym->type;
-                    break;
-                }
-                sym = sym->next;
-            }
-
-            if (inner_type != TYPE_STRING) {
-                fprintf(stderr, "Semantic Error: '&' can only be applied to indexed strings, got '%s'.\n", type_to_string(inner_type));
-                exit(1);
-            }
-
-            return TYPE_CHAR_PTR;
-        } else {
-            // Check for &x
-            Symbol* sym = symbol_table;
-            while (sym) {
-                if (!sym->is_function && strcmp(sym->name, expr->left->token) == 0) {
-                    inner_type = sym->type;
-                    break;
-                }
-                sym = sym->next;
-            }
-
-            if (inner_type == TYPE_INT) return TYPE_INT_PTR;
-            if (inner_type == TYPE_CHAR) return TYPE_CHAR_PTR;
-            if (inner_type == TYPE_REAL) return TYPE_REAL_PTR;
-
-            fprintf(stderr, "Semantic Error: '&' operator can only be applied to variables of type int, char, or real, got '%s'.\n", type_to_string(inner_type));
-            exit(1);
-        }
-    }
-
     return TYPE_INVALID;
 }
-
-
-
 
 const char* type_to_string(VarType type) {
     switch (type) {
@@ -1458,4 +1288,539 @@ int check_no_return_statements(node* stmt) {
     }
 
     return check_no_return_statements(stmt->left) || check_no_return_statements(stmt->right);
+}
+
+// ==================== 3AC GENERATION ====================
+/* =========================  3-ADDRESS-CODE GENERATOR  =========================
+   Comprehensive 3AC generation module adapted for this compiler's AST structure
+*/
+#include <stdarg.h>
+
+/* ---------- instruction list infrastructure ---------- */
+typedef struct Instr {
+    char *text;
+    struct Instr *next;
+} Instr;
+
+static Instr *codeHead = NULL, *codeTail = NULL;
+static int    tempCnt  = 0;
+static int    labelCnt = 1;
+
+static char *newTemp () { char b[32]; sprintf(b,"t%d", tempCnt++);  return strdup(b); }
+static char *newLabel() { char b[32]; sprintf(b,"L%d", labelCnt++); return strdup(b); }
+
+static void emit(const char *fmt, ...)
+{
+    va_list ap; char buf[128];
+    va_start(ap, fmt); vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+
+    Instr *n = (Instr *)malloc(sizeof(Instr));
+    n->text = strdup(buf); n->next = NULL;
+    if (!codeHead) codeHead = codeTail = n;
+    else           codeTail = codeTail->next = n;
+}
+
+void dumpCode(FILE *out)
+{
+    const char *IND = "    ";                 /* 4-spaces indentation */
+
+    for (Instr *p = codeHead; p; p = p->next) {
+        const char *txt = p->text;
+        size_t      len = strlen(txt);
+
+        /* LABEL or function header - keep left-aligned */
+        if (len > 0 && txt[len - 1] == ':')
+            fprintf(out, "%s\n", txt);
+        else
+            fprintf(out, "%s%s\n", IND, txt); /* other instructions indented */
+    }
+}
+
+/* ---------- helpers --------------------------------------------------------- */
+static int isLiteral(const char *tok)
+{
+    if (!tok) return 0;
+    // Check if it's a number (integer or float)
+    char *endptr;
+    strtod(tok, &endptr);
+    return *endptr == '\0' || !strcmp(tok,"TRUE") || !strcmp(tok,"FALSE");
+}
+
+/* For our AST, literal values are often directly in the token */
+static const char *literalValue(node *lit)
+{
+    if (!lit || !lit->token) return "0";
+    return lit->token;
+}
+
+/* fast sizeof for frame calculation (4-byte default) */
+static int sizeofType(const char *t)
+{
+    if (!t) return 4;
+    if (!strcasecmp(t,"real") || !strcasecmp(t,"real*")) return 8;
+    if (!strcasecmp(t,"string")) return 8;
+    return 4;   /* int, char, bool, int*, char* … */
+}
+
+/* ===== TEMP-SIZE TRACKING =========================================== */
+static int tempBytesInFunc = 0;          /* reset at each genFunction */
+
+/* Simple type inference for expressions */
+static const char* inferExprType(node *e)
+{
+    if (!e || !e->token) return "int";
+    
+    // Check if it's a literal number
+    if (isLiteral(e->token)) {
+        if (strchr(e->token, '.')) return "real";
+        return "int";
+    }
+    
+    if (!strcmp(e->token, "TRUE") || !strcmp(e->token, "FALSE")) return "bool";
+    
+    // For variables, look up in symbol table
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (!sym->is_function && strcmp(sym->name, e->token) == 0) {
+            return type_to_string(sym->type);
+        }
+        sym = sym->next;
+    }
+    
+    return "int"; // default
+}
+
+/* byte size of the value produced by expression e */
+static int resultSize(node *e)
+{
+    const char *t = inferExprType(e);    /* "int", "real*", …        */
+    if (!t) return 4;
+    if (!strcasecmp(t,"real") || !strcasecmp(t,"real*") || !strcasecmp(t,"string"))
+        return 8;                       /* 8-byte values              */
+    return 4;                           /* everything else            */
+}
+
+/* allocate a temp for expression e and remember its size */
+static char *makeTempFor(node *e)
+{
+    tempBytesInFunc += resultSize(e);
+    char buf[32]; sprintf(buf,"t%d", tempCnt++);
+    return strdup(buf);
+}
+
+/* Simple symbol lookup */
+static int lookupSymbol(const char *name)
+{
+    Symbol* sym = symbol_table;
+    while (sym) {
+        if (!sym->is_function && strcmp(sym->name, name) == 0) {
+            return 1;
+        }
+        sym = sym->next;
+    }
+    return 0;
+}
+
+/* modify "BeginFunc 0" with real byte count */
+static void patchBeginSize(Instr *beginLine, int bytes)
+{
+    char buf[16]; sprintf(buf, "%d", bytes);
+    /* "BeginFunc " is 10 chars, overwrite from there */
+    strcpy(beginLine->text + 10, buf);
+}
+
+/* ---------- forward decls for mutually recursive generators --------------- */
+static char *genExpr(node *e);
+static void  genStmt(node *s);
+
+/* ---------- expression → 3AC (returns temp / var name) -------------------- */
+/* ===== helpers for conditions ===== */
+static int isCmpOp(const char *t)
+{
+    return !strcmp(t,"==") || !strcmp(t,"!=") ||
+           !strcmp(t,"<")  || !strcmp(t,">")  ||
+           !strcmp(t,"<=") || !strcmp(t,">=");
+}
+
+/* returns operand – if it's a literal returns the value itself, otherwise calls genExpr */
+static char *genOperand(node *e)
+{
+    if (isLiteral(e->token))           /* number/character/string/TRUE/FALSE/NULL */
+        return strdup(literalValue(e));/* don't create temporary */
+    return genExpr(e);                 /* everything else – as usual */
+}
+
+static char *genExpr(node *e)
+{
+    if (!e) return strdup("0");
+
+    /* 1. terminals ---------------------------------------------------- */
+    if (isLiteral(e->token)) {
+        char *t = makeTempFor(e);
+        emit("%s = %s", t, literalValue(e));
+        return t;
+    }
+    if (!strcmp(e->token,"TRUE")) {
+        char *t = makeTempFor(e);
+        emit("%s = 1", t);
+        return t;
+    }
+    if (!strcmp(e->token,"FALSE")) {
+        char *t = makeTempFor(e);
+        emit("%s = 0", t);
+        return t;
+    }
+    if (!strcmp(e->token,"null")) {
+        char *t = makeTempFor(e);
+        emit("%s = 0", t);
+        return t;
+    }
+    if (lookupSymbol(e->token)) {          /* variable / param */
+        return strdup(e->token);           /* already stored */
+    }
+
+    /* 2. unary -------------------------------------------------------- */
+    if (!strcmp(e->token,"unary-")) {
+        char *v = genExpr(e->left);
+        char *t = makeTempFor(e); 
+        emit("%s = - %s", t, v); 
+        return t;
+    }
+    if (!strcmp(e->token,"not")) {
+        char *v = genExpr(e->left);
+        char *t = makeTempFor(e); 
+        emit("%s = ! %s", t, v); 
+        return t;
+    }
+    if (!strcmp(e->token,"&")) {
+        char *v = genExpr(e->left);
+        char *t = makeTempFor(e); 
+        emit("%s = & %s", t, v); 
+        return t;
+    }
+    if (!strcmp(e->token,"*") && !e->right) { // unary dereference
+        char *p = genExpr(e->left);
+        char *t = makeTempFor(e); 
+        emit("%s = * %s", t, p); 
+        return t;
+    }
+
+    /* 3. binary arithmetic / logic ----------------------------------- */
+    const char *binOps[] = {"+","-","*","/","%","and","or",
+                            "==","!=","<",">","<=",">="};
+    for (size_t i = 0; i < sizeof(binOps)/sizeof(binOps[0]); ++i) {
+        if (!strcmp(e->token, binOps[i])) {
+            char *l = genExpr(e->left);
+            char *r = genExpr(e->right);
+            char *t = makeTempFor(e);
+            emit("%s = %s %s %s", t, l, binOps[i], r);
+            return t;
+        }
+    }
+
+    /* 4. array indexing ---------------------------------------------- */
+    if (!strcmp(e->token,"index")) {
+        char *base = genExpr(e->left);   /* IDENT gives name */
+        char *idx  = genExpr(e->right);
+        char *t    = makeTempFor(e);
+        emit("%s = %s [ %s ]", t, base, idx);
+        return t;
+    }
+
+    /* 5. function call ----------------------------------------------- */
+    if (!strcmp(e->token,"call")) {
+        const char *fname = e->left->token;
+
+        /* gather params into stack[] for reverse push                  */
+        node *stack[32]; int top = 0;
+        for (node *p = e->right; p; p = (!strcmp(p->token,"expr_list")) ? p->right : NULL)
+            stack[top++] = (!strcmp(p->token,"expr_list")) ? p->left : p;
+
+        int bytes = 0;
+        for (int i = top - 1; i >= 0; --i) {
+            char *val = genExpr(stack[i]);
+            emit("PushParam %s", val);
+            bytes += sizeofType(inferExprType(stack[i]));
+        }
+
+        char *ret = makeTempFor(e);
+        emit("%s = LCall %s", ret, fname);
+        if (bytes) emit("PopParams %d", bytes);
+        return ret;
+    }
+
+    // For variables not found in symbol table, return as-is (might be identifier)
+    return strdup(e->token);
+}
+
+/* ---------- statement generator ---------------------------------------- */
+static void genStmt(node *s)
+{
+    if (!s || !s->token) return;
+
+    /* list of statements */
+    if (!strcmp(s->token,"statements")) { 
+        genStmt(s->right); // Process in reverse order (right first)
+        genStmt(s->left); 
+        return; 
+    }
+
+    /* assignments ----------------------------------------------------- */
+    if (!strcmp(s->token,"assign")) {
+        char *rhs = genExpr(s->right);
+        emit("%s = %s", s->left->token, rhs);
+        return;
+    }
+    if (!strcmp(s->token,"pointer_assign")) {
+        char *lhs = genExpr(s->left);
+        char *rhs = genExpr(s->right);
+        emit("* %s = %s", lhs, rhs);
+        return;
+    }
+    if (!strcmp(s->token,"array_assign")) {
+        char *idx = genExpr(s->left->right);
+        char *rhs = genExpr(s->right);
+        emit("%s [ %s ] = %s", s->left->token, idx, rhs);
+        return;
+    }
+    if (!strcmp(s->token,"null_assign")) { 
+        emit("%s = 0", s->left->token); 
+        return; 
+    }
+
+    /* return ---------------------------------------------------------- */
+    if (!strcmp(s->token,"return_val")) { 
+        emit("Return %s", genExpr(s->left)); 
+        return; 
+    }
+
+    /* block ----------------------------------------------------------- */
+    if (!strcmp(s->token,"block")) { 
+        genStmt(s->left); 
+        return; 
+    }
+
+    /* IF -------------------------------------------------------------- */
+    if (!strcmp(s->token,"if")) {
+        node *c = s->left;                             /* condition */
+        char *Ltrue = newLabel(), *Lend = newLabel();
+
+        if (isCmpOp(c->token)) {                       /* condition like a < 5 etc */
+            char *lhs = genOperand(c->left);
+            char *rhs = genOperand(c->right);
+            emit("if %s %s %s goto %s", lhs, c->token, rhs, Ltrue);
+            emit("goto %s", Lend);
+        } else {                                       /* general condition */
+            char *t = genExpr(c);
+            emit("if %s == 0 goto %s", t, Lend);
+            emit("goto %s", Ltrue);
+        }
+
+        emit("%s:", Ltrue);
+        genStmt(s->right);
+        emit("%s:", Lend); 
+        return;
+    }
+
+    if (!strcmp(s->token,"if-full")) {
+        node *cond_wrapper = s->left;          // "cond" wrapper node
+        node *cond_node = cond_wrapper->left;  // actual condition (==, !=, etc.)
+        node *then_node = s->right->left;  
+        node *else_node = s->right->right->left; 
+        
+        char *Lthen = newLabel(), *Lelse = newLabel(), *Lend = newLabel();
+
+        if (isCmpOp(cond_node->token)) {
+            char *lhs = genOperand(cond_node->left);
+            char *rhs = genOperand(cond_node->right);
+            emit("if %s %s %s goto %s", lhs, cond_node->token, rhs, Lthen);
+            emit("goto %s", Lelse);
+        } else {
+            char *t = genExpr(cond_node);
+            emit("if %s != 0 goto %s", t, Lthen);
+            emit("goto %s", Lelse);
+        }
+
+        emit("%s:", Lthen);  
+        genStmt(then_node);  
+        emit("goto %s", Lend);
+        emit("%s:", Lelse);  
+        genStmt(else_node); 
+        emit("%s:", Lend);   
+        return;
+    }
+
+    /* WHILE ----------------------------------------------------------- */
+    if (!strcmp(s->token,"while")) {
+        char *Lcond = newLabel(), *Lbody = newLabel(), *Lend = newLabel();
+        emit("%s:", Lcond);
+
+        node *c = s->left;
+        if (isCmpOp(c->token)) {
+            char *lhs = genOperand(c->left);
+            char *rhs = genOperand(c->right);
+            emit("if %s %s %s goto %s", lhs, c->token, rhs, Lbody);
+            emit("goto %s", Lend);
+        } else {
+            char *t = genExpr(c);
+            emit("if %s != 0 goto %s", t, Lbody);
+            emit("goto %s", Lend);
+        }
+
+        emit("%s:", Lbody);  
+        genStmt(s->right);   
+        emit("goto %s", Lcond);
+        emit("%s:", Lend);   
+        return;
+    }
+
+    /* DO-WHILE -------------------------------------------------------- */
+    if (!strcmp(s->token,"do-while")) {
+        char *Ls = newLabel();
+        emit("%s:", Ls); 
+        genStmt(s->left);
+        emit("if %s != 0 goto %s", genExpr(s->right->left), Ls); 
+        return;
+    }
+
+    /* FOR ------------------------------------------------------------- */
+    if (!strcmp(s->token,"for")) {
+        node *h = s->left;
+        node *initVar   = h->left->left;     /* IDENT */
+        node *initExpr  = h->left->right;
+        node *condExpr  = h->right->left;
+        node *updateExp = h->right->right;
+
+        char *Lc = newLabel(), *Le = newLabel();
+
+        emit("%s = %s", initVar->token, genExpr(initExpr));
+        emit("%s:", Lc);
+        emit("if %s == 0 goto %s", genExpr(condExpr), Le);
+        genStmt(s->right);
+        emit("%s = %s", updateExp->left->token, genExpr(updateExp->right));
+        emit("goto %s", Lc);
+        emit("%s:", Le); 
+        return;
+    }
+    
+    /* function call as statement */
+    if (!strcmp(s->token,"call")) {
+        genExpr(s); // Call genExpr to handle the function call
+        return;
+    }
+}
+
+/* ---------- per-function + global traversal ---------------------------- */
+static void genFunction(node *f)
+{
+    if (!f || strcmp(f->token, "FUNC") != 0) return;
+    
+    node *header = f->left;
+    const char *fname = header->token;          
+    
+    // Convert _main_ to main for output
+    if (strcmp(fname, "_main_") == 0) {
+        fname = "main";
+    }
+    
+    emit("\n%s:", fname);
+    emit("BeginFunc 0");                         /* placeholder */
+    Instr *beginLine = codeTail;
+    tempBytesInFunc  = 0;          /* start counting for this func */
+
+    node *body = f->right;  // body node
+    
+    /* statements are in body->left (the statements node) */
+    node *stmts = body->left;
+
+    genStmt(stmts);
+
+    /* frame size = locals + total temp bytes we just counted */
+    int tempsBytes = tempBytesInFunc;
+
+    /* count local decls - look for VAR declarations in the body structure */
+    int localsBytes = 0;
+    
+    // Look for VAR in function header (for functions with parameters and VAR)
+    if (header->right && header->right->right && strcmp(header->right->right->token, "VAR") == 0) {
+        node *varNode = header->right->right;
+        node *decls = varNode->left;
+        while (decls) {
+            node *single = (strcmp(decls->token, "decls") == 0) ? decls->left : decls;
+            if (single && strcmp(single->token, "DECL") == 0) {
+                const char *typ = single->left->token;
+                
+                // Count identifiers in this declaration
+                int nvars = 0;
+                node *ids = single->right;
+                while (ids) {
+                    nvars++;
+                    ids = ids->right;
+                }
+                if (nvars == 0) nvars = 1;
+                
+                localsBytes += nvars * sizeofType(typ);
+            }
+            decls = (strcmp(decls->token, "decls") == 0) ? decls->right : NULL;
+        }
+    }
+    // Look for VAR in main function (header->right for main)
+    else if (header->right && strcmp(header->right->token, "VAR") == 0) {
+        node *varNode = header->right;
+        node *decls = varNode->left;
+        while (decls) {
+            node *single = (strcmp(decls->token, "decls") == 0) ? decls->left : decls;
+            if (single && strcmp(single->token, "DECL") == 0) {
+                const char *typ = single->left->token;
+                
+                // Count identifiers in this declaration
+                int nvars = 0;
+                node *ids = single->right;
+                while (ids) {
+                    nvars++;
+                    ids = ids->right;
+                }
+                if (nvars == 0) nvars = 1;
+                
+                localsBytes += nvars * sizeofType(typ);
+            }
+            decls = (strcmp(decls->token, "decls") == 0) ? decls->right : NULL;
+        }
+    }
+    
+    patchBeginSize(beginLine, tempsBytes + localsBytes);
+    emit("EndFunc");
+}
+
+static void genGlobal(node *n)
+{
+    if (!n) return;
+    if (!strcmp(n->token,"functions")) { 
+        genGlobal(n->left); 
+        genGlobal(n->right); 
+    }
+    else if (!strcmp(n->token,"FUNC")) {
+        genFunction(n);
+    }
+}
+
+void generate_3ac(node *root)
+{
+    if (!root) return;
+    
+    // Reset global state
+    codeHead = codeTail = NULL;
+    tempCnt = 0;
+    labelCnt = 1;
+    
+    if (root && !strcmp(root->token,"code")) {
+        genGlobal(root->left);
+    }
+    
+    // Write to file
+    FILE *out = fopen("output.ac3", "w");
+    if (out) {
+        dumpCode(out);
+        fclose(out);
+    }
 }

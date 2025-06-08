@@ -1,0 +1,30 @@
+
+factorial:
+    BeginFunc 28
+    t0 = 1
+    result = t0
+    t1 = 1
+    i = t1
+L1:
+    if i <= n goto L2
+    goto L3
+L2:
+    t2 = result * i
+    result = t2
+    t3 = 1
+    t4 = i + t3
+    i = t4
+    goto L1
+L3:
+    Return result
+    EndFunc
+
+main:
+    BeginFunc 16
+    t5 = 5
+    num = t5
+    PushParam num
+    t6 = LCall factorial
+    PopParams 4
+    fact = t6
+    EndFunc
