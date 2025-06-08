@@ -861,7 +861,7 @@ int main()
     if (yyparse() == 0) {
         if (main_count == 0) 
         {
-            fprintf(stderr, "Semantic Error: Missing '_main_' function.\n");
+            fprintf(stderr, "Semantic  Error: Missing '_main_' function.\n");
             return 1;
         } else if (main_count > 1) 
         {
