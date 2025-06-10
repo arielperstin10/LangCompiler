@@ -113,7 +113,7 @@ ID [A-Za-z][A-Za-z0-9_]*
 
 {ID}              { yylval.stringVal = strdup(yytext); return IDENTIFIER; }
 
-\#\-\>([^<]|(\<[^\-])|([\<][\-][^\>]))*\<\-\#  { /* Skip comments */ }
+"#->"[^<]*"<-#"    { /* Skip comments */ }
 
 [ \t\r\n]+        { /* Skip whitespace */ }
 

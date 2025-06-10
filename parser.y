@@ -248,8 +248,8 @@ parameter: IDENTIFIER type ':' IDENTIFIER {
         yyerror("Error: parameter names must start with 'par'.");
         YYERROR;
     }
-    fprintf(stderr, "[DEBUG] Matched parameter: %s of type %s with name %s\n", 
-            $1, $2->token, $4);
+    /*fprintf(stderr, "[DEBUG] Matched parameter: %s of type %s with name %s\n", 
+            $1, $2->token, $4);*/
 
     int current_num = atoi(&$1[3]);
     if (current_num != last_param_number + 1) {
@@ -519,9 +519,9 @@ assignment_statement:
             }
         } else if (lhs_type != rhs_type) {
             if (lhs_type == TYPE_REAL && rhs_type == TYPE_INT) {
-                fprintf(stderr, "[INFO] Implicitly promoting 'int' to 'real' for assignment.\n");
+                /*fprintf(stderr, "[INFO] Implicitly promoting 'int' to 'real' for assignment.\n");*/
             } else if (lhs_type == TYPE_INT && rhs_type == TYPE_REAL) {
-                fprintf(stderr, "[INFO] Implicitly demoting 'real' to 'int' for assignment.\n");
+                /*fprintf(stderr, "[INFO] Implicitly demoting 'real' to 'int' for assignment.\n");*/
             } else {
                 fprintf(stderr, "Semantic Error: cannot assign '%s' to variable of type '%s'.\n",
                         type_to_string(rhs_type), type_to_string(lhs_type));
@@ -871,7 +871,7 @@ int main()
         
         // Generate 3AC code
         generate_3ac(root);
-        printf("3AC code generated in output.ac3\n");
+        printf("3AC code generated in output.txt\n");
         
         printf("Semantic checks passed.\n");
     }
@@ -1025,8 +1025,8 @@ void insert_symbol(char* name, VarType type, int is_function, VarType return_typ
     new_sym->next = symbol_table;
     symbol_table = new_sym;
 
-    fprintf(stderr, "[INSERT] Added symbol '%s' | Type: %s | Scope: %d | FuncScopeID: %d | is_function: %d\n",
-            name, type_to_string(type), current_scope_level, current_function_scope_id, is_function);
+    /*fprintf(stderr, "[INSERT] Added symbol '%s' | Type: %s | Scope: %d | FuncScopeID: %d | is_function: %d\n",
+            name, type_to_string(type), current_scope_level, current_function_scope_id, is_function);*/
 
 
     // Handle main function count
@@ -1068,20 +1068,18 @@ int is_function_defined(const char* name) {
 
 int is_variable_defined(const char* name) {
     Symbol* sym = symbol_table;
-    while (sym) {
+    for (; sym; sym = sym->next) {
         if (!sym->is_function &&
             strcmp(sym->name, name) == 0 &&
             sym->scope_level <= current_scope_level &&
-            sym->function_scope_id == current_function_scope_id) {
+            sym->function_scope_id <= current_function_scope_id) {
             return 1;
         }
-        sym = sym->next;
     }
 
-    // Debug output when variable not found
-    fprintf(stderr, "[DEBUG] Variable '%s' not found.\n", name);
-    fprintf(stderr, "[DEBUG] Current Scope: %d | Function Scope ID: %d\n", current_scope_level, current_function_scope_id);
-    print_symbol_table();  // 🔍 dump the whole table
+    /*fprintf(stderr, "[DEBUG] Variable '%s' not found.\n", name);*/
+    /*fprintf(stderr, "[DEBUG] Current Scope: %d | Function Scope ID: %d\n", current_scope_level, current_function_scope_id);*/
+    /*print_symbol_table();*/
 
     return 0;
 }
@@ -1139,6 +1137,16 @@ VarType infer_type(node* expr) {
         return TYPE_REAL;
     }
 
+    if (strcmp(expr->token, "unary-") == 0) {
+        VarType inner = infer_type(expr->left);
+        if (inner == TYPE_INT || inner == TYPE_REAL) {
+            return inner;
+        } else {
+            fprintf(stderr, "Semantic Error: unary '-' can only be applied to int or real, got '%s'.\n", type_to_string(inner));
+            exit(1);
+        }
+    }
+
     if (strcmp(expr->token, "CHAR_LITERAL") == 0 && expr->left && expr->left->token) {
         return TYPE_CHAR;
     }
@@ -1182,6 +1190,17 @@ VarType infer_type(node* expr) {
         if (l == r) return TYPE_BOOL;
         fprintf(stderr, "Semantic Error: Comparison operands type mismatch '%s' and '%s'.\n",
                 type_to_string(l), type_to_string(r));
+        exit(1);
+    }
+
+    if (strcmp(expr->token, "and") == 0 || strcmp(expr->token, "or") == 0) {
+        VarType l = infer_type(expr->left);
+        VarType r = infer_type(expr->right);
+        if (l == TYPE_BOOL && r == TYPE_BOOL) {
+            return TYPE_BOOL;
+        }
+        fprintf(stderr, "Semantic Error: logical '%s' requires bool operands, got '%s' and '%s'.\n",
+                expr->token, type_to_string(l), type_to_string(r));
         exit(1);
     }
 
@@ -1256,11 +1275,11 @@ void insert_parameters(node* param_iter) {
         if (param_iter->left && param_iter->right) {
             VarType param_type = string_to_type(param_iter->left->token);
             char* param_name = param_iter->right->token;
-            fprintf(stderr, "[INSERT] Recursive Param '%s' of type %s\n", param_name, type_to_string(param_type));
+            /*fprintf(stderr, "[INSERT] Recursive Param '%s' of type %s\n", param_name, type_to_string(param_type));*/
             insert_symbol(param_name, param_type, 0, TYPE_INVALID, NULL, 0);
         }
     } else {
-        fprintf(stderr, "[WARNING] Unexpected param_iter->token = %s\n", param_iter->token);
+        /*fprintf(stderr, "[WARNING] Unexpected param_iter->token = %s\n", param_iter->token);*/
     }
 }
 
@@ -1818,7 +1837,7 @@ void generate_3ac(node *root)
     }
     
     // Write to file
-    FILE *out = fopen("output.ac3", "w");
+    FILE *out = fopen("output.txt", "w");
     if (out) {
         dumpCode(out);
         fclose(out);

@@ -1,0 +1,23 @@
+
+process_data:
+    BeginFunc 8
+    if value > 0 goto L1
+    goto L2
+L1:
+    t0 = 2
+    t1 = value * t0
+    result = t1
+    goto L3
+L2:
+    result = value
+L3:
+    EndFunc
+
+main:
+    BeginFunc 12
+    t2 = 42
+    data = t2
+    PushParam data
+    t3 = LCall process_data
+    PopParams 4
+    EndFunc
